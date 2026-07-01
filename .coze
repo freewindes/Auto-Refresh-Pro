@@ -1,0 +1,11 @@
+[project]
+entrypoint = "preview.html"
+requires = ["nodejs-24"]
+
+[dev]
+build = []
+run = ["sh", "-c", "python3 -m http.server ${DEPLOY_RUN_PORT}"]
+
+[deploy]
+build = []
+run = ["sh", "-c", "python3 -m http.server ${DEPLOY_RUN_PORT}"]

@@ -1,0 +1,399 @@
+/**
+ * Auto Refresh Pro - Popup Script
+ * Controls the extension UI and communicates with background/content scripts
+ */
+
+// DOM Elements
+const els = {
+  statusBadge: document.getElementById('statusBadge'),
+  statusText: document.querySelector('.status-text'),
+  timerCount: document.getElementById('timerCount'),
+  ringProgress: document.getElementById('ringProgress'),
+  refreshCount: document.getElementById('refreshCount'),
+  intervalInput: document.getElementById('intervalInput'),
+  decreaseBtn: document.getElementById('decreaseBtn'),
+  increaseBtn: document.getElementById('increaseBtn'),
+  startBtn: document.getElementById('startBtn'),
+  stopBtn: document.getElementById('stopBtn'),
+  modeTabs: document.querySelectorAll('.mode-tab'),
+  xpathSection: document.getElementById('xpathSection'),
+  xpathInput: document.getElementById('xpathInput'),
+  pickXpathBtn: document.getElementById('pickXpathBtn'),
+  xpathHint: document.getElementById('xpathHint'),
+  iframeSection: document.getElementById('iframeSection'),
+  frameSelect: document.getElementById('frameSelect'),
+  iframeHint: document.getElementById('iframeHint'),
+  logList: document.getElementById('logList'),
+  presetBtns: document.querySelectorAll('.preset-btn'),
+};
+
+// State
+let state = {
+  running: false,
+  interval: 60,
+  mode: 'full', // 'full' | 'xpath'
+  xpath: '',
+  targetFrame: 'top',
+  refreshCount: 0,
+  remaining: 60,
+  picking: false,
+};
+
+// Constants
+const RING_CIRCUMFERENCE = 2 * Math.PI * 54; // ~339.292
+
+// ===== Initialization =====
+async function init() {
+  await loadState();
+  bindEvents();
+  updateUI();
+  startCountdownSync();
+  detectIframes();
+}
+
+async function loadState() {
+  try {
+    const result = await chrome.storage.local.get([
+      'interval', 'mode', 'xpath', 'targetFrame', 'running', 'refreshCount'
+    ]);
+    state.interval = result.interval || 60;
+    state.mode = result.mode || 'full';
+    state.xpath = result.xpath || '';
+    state.targetFrame = result.targetFrame || 'top';
+    state.running = result.running || false;
+    state.refreshCount = result.refreshCount || 0;
+    state.remaining = state.interval;
+
+    // Sync countdown from background
+    const statusResult = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+    if (statusResult && statusResult.running) {
+      state.remaining = statusResult.remaining || state.interval;
+      state.running = true;
+    } else {
+      state.running = false;
+    }
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+}
+
+async function saveState() {
+  try {
+    await chrome.storage.local.set({
+      interval: state.interval,
+      mode: state.mode,
+      xpath: state.xpath,
+      targetFrame: state.targetFrame,
+      running: state.running,
+      refreshCount: state.refreshCount,
+    });
+  } catch (e) {
+    console.error('Failed to save state:', e);
+  }
+}
+
+// ===== Event Binding =====
+function bindEvents() {
+  // Interval controls
+  els.intervalInput.addEventListener('change', handleIntervalChange);
+  els.decreaseBtn.addEventListener('click', () => adjustInterval(-1));
+  els.increaseBtn.addEventListener('click', () => adjustInterval(1));
+
+  // Presets
+  els.presetBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = parseInt(btn.dataset.value, 10);
+      state.interval = val;
+      els.intervalInput.value = val;
+      updatePresetHighlight(val);
+      handleIntervalChange();
+    });
+  });
+
+  // Mode tabs
+  els.modeTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      state.mode = tab.dataset.mode;
+      els.modeTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      els.xpathSection.classList.toggle('hidden', state.mode !== 'xpath');
+      saveState();
+    });
+  });
+
+  // XPath picker
+  els.pickXpathBtn.addEventListener('click', startXPathPicker);
+  els.xpathInput.addEventListener('change', () => {
+    state.xpath = els.xpathInput.value.trim();
+    saveState();
+  });
+
+  // Frame select
+  els.frameSelect.addEventListener('change', () => {
+    state.targetFrame = els.frameSelect.value;
+    saveState();
+  });
+
+  // Start / Stop
+  els.startBtn.addEventListener('click', startRefresh);
+  els.stopBtn.addEventListener('click', stopRefresh);
+}
+
+// ===== Interval Controls =====
+function handleIntervalChange() {
+  let val = parseInt(els.intervalInput.value, 10);
+  if (isNaN(val) || val < 1) val = 1;
+  if (val > 86400) val = 86400;
+  state.interval = val;
+  els.intervalInput.value = val;
+  state.remaining = val;
+  updatePresetHighlight(val);
+  updateTimerDisplay();
+  saveState();
+
+  // If running, restart timer with new interval
+  if (state.running) {
+    chrome.runtime.sendMessage({
+      type: 'UPDATE_INTERVAL',
+      interval: state.interval,
+    });
+  }
+}
+
+function adjustInterval(delta) {
+  let val = parseInt(els.intervalInput.value, 10) || 60;
+  val += delta;
+  if (val < 1) val = 1;
+  if (val > 86400) val = 86400;
+  state.interval = val;
+  els.intervalInput.value = val;
+  state.remaining = val;
+  updatePresetHighlight(val);
+  updateTimerDisplay();
+  saveState();
+}
+
+function updatePresetHighlight(val) {
+  els.presetBtns.forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.value, 10) === val);
+  });
+}
+
+// ===== XPath Picker =====
+async function startXPathPicker() {
+  if (state.picking) {
+    // Cancel picking
+    state.picking = false;
+    els.pickXpathBtn.classList.remove('picking');
+    els.pickXpathBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+      </svg>选取`;
+    els.xpathHint.textContent = '已取消选取';
+    els.xpathHint.classList.remove('active');
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    chrome.tabs.sendMessage(tab.id, { type: 'STOP_PICKING' });
+    return;
+  }
+
+  state.picking = true;
+  els.pickXpathBtn.classList.add('picking');
+  els.pickXpathBtn.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>取消`;
+  els.xpathHint.textContent = '请在页面上点击要选取的元素...';
+  els.xpathHint.classList.add('active');
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  chrome.tabs.sendMessage(tab.id, { type: 'START_PICKING' });
+}
+
+// ===== Start / Stop =====
+async function startRefresh() {
+  // Validate
+  if (state.mode === 'xpath' && !state.xpath) {
+    addLog('请先输入或选取 XPath 表达式', 'error');
+    return;
+  }
+
+  state.running = true;
+  state.remaining = state.interval;
+  state.refreshCount = 0;
+  await saveState();
+
+  chrome.runtime.sendMessage({
+    type: 'START',
+    interval: state.interval,
+    mode: state.mode,
+    xpath: state.xpath,
+    targetFrame: state.targetFrame,
+  });
+
+  addLog(`已启动 - 间隔 ${state.interval} 秒, 模式: ${state.mode === 'full' ? '全页刷新' : 'XPath点击'}`, 'success');
+  updateUI();
+}
+
+async function stopRefresh() {
+  state.running = false;
+  state.remaining = state.interval;
+  await saveState();
+
+  chrome.runtime.sendMessage({ type: 'STOP' });
+
+  addLog('已停止刷新', 'info');
+  updateUI();
+}
+
+// ===== iframe Detection =====
+async function detectIframes() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) return;
+
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'DETECT_IFRAMES' });
+    if (response && response.iframes && response.iframes.length > 0) {
+      els.iframeSection.classList.remove('hidden');
+      els.iframeHint.classList.remove('hidden');
+
+      // Populate frame select
+      els.frameSelect.innerHTML = '<option value="top">主页面</option>';
+      response.iframes.forEach((frame, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = `iframe #${i + 1}: ${frame.src || frame.name || '(unnamed)'}`;
+        els.frameSelect.appendChild(opt);
+      });
+
+      // Restore selection
+      if (state.targetFrame !== 'top') {
+        els.frameSelect.value = state.targetFrame;
+      }
+    } else {
+      els.iframeSection.classList.add('hidden');
+    }
+  } catch (e) {
+    // Content script may not be injected on some pages
+    els.iframeSection.classList.add('hidden');
+  }
+}
+
+// ===== Countdown Sync =====
+function startCountdownSync() {
+  setInterval(async () => {
+    if (!state.running) return;
+    try {
+      const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+      if (status && status.running) {
+        state.remaining = status.remaining;
+        state.refreshCount = status.refreshCount || state.refreshCount;
+        updateTimerDisplay();
+        els.refreshCount.textContent = state.refreshCount;
+      }
+    } catch (e) {
+      // Background may not respond
+    }
+  }, 1000);
+}
+
+// Listen for refresh events from background
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'REFRESH_DONE') {
+    state.refreshCount = msg.count;
+    els.refreshCount.textContent = state.refreshCount;
+    state.remaining = state.interval;
+    updateTimerDisplay();
+    addLog(`第 ${msg.count} 次${msg.mode === 'full' ? '刷新' : '点击'}完成`, 'success');
+    saveState();
+  } else if (msg.type === 'REFRESH_ERROR') {
+    addLog(`执行失败: ${msg.error}`, 'error');
+  } else if (msg.type === 'XPATH_PICKED') {
+    state.picking = false;
+    els.pickXpathBtn.classList.remove('picking');
+    els.pickXpathBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+      </svg>选取`;
+    els.xpathHint.textContent = '已选取元素';
+    els.xpathHint.classList.remove('active');
+    state.xpath = msg.xpath;
+    els.xpathInput.value = msg.xpath;
+    saveState();
+    addLog(`已选取 XPath: ${msg.xpath}`, 'info');
+  }
+});
+
+// ===== UI Updates =====
+function updateUI() {
+  // Status badge
+  els.statusBadge.classList.toggle('running', state.running);
+  els.statusText.textContent = state.running ? '运行中' : '已停止';
+
+  // Buttons
+  els.startBtn.classList.toggle('hidden', state.running);
+  els.stopBtn.classList.toggle('hidden', !state.running);
+
+  // Mode
+  els.modeTabs.forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.mode === state.mode);
+  });
+  els.xpathSection.classList.toggle('hidden', state.mode !== 'xpath');
+
+  // Interval
+  els.intervalInput.value = state.interval;
+  updatePresetHighlight(state.interval);
+
+  // XPath
+  els.xpathInput.value = state.xpath;
+
+  // Refresh count
+  els.refreshCount.textContent = state.refreshCount;
+
+  // Timer
+  updateTimerDisplay();
+
+  // Disable controls while running
+  els.intervalInput.disabled = state.running;
+  els.decreaseBtn.disabled = state.running;
+  els.increaseBtn.disabled = state.running;
+  els.presetBtns.forEach(btn => btn.disabled = state.running);
+}
+
+function updateTimerDisplay() {
+  els.timerCount.textContent = state.remaining;
+
+  // Update ring progress
+  const progress = state.running
+    ? (state.remaining / state.interval) * RING_CIRCUMFERENCE
+    : RING_CIRCUMFERENCE;
+  els.ringProgress.style.strokeDasharray = RING_CIRCUMFERENCE;
+  els.ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE - progress;
+}
+
+// ===== Logging =====
+function addLog(message, type = 'info') {
+  // Remove empty placeholder
+  const empty = els.logList.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+  const item = document.createElement('div');
+  item.className = `log-item ${type}`;
+  item.innerHTML = `
+    <span class="log-time">${timeStr}</span>
+    <span class="log-msg">${message}</span>
+  `;
+
+  els.logList.prepend(item);
+
+  // Keep max 50 logs
+  while (els.logList.children.length > 50) {
+    els.logList.lastChild.remove();
+  }
+}
+
+// ===== Init =====
+init();

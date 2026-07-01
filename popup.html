@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto Refresh Pro</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+        </svg>
+        <span>Auto Refresh Pro</span>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <span class="status-dot"></span>
+        <span class="status-text">已停止</span>
+      </div>
+    </header>
+
+    <!-- Timer Display -->
+    <div class="timer-section">
+      <div class="timer-ring" id="timerRing">
+        <svg viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="54" class="ring-bg"/>
+          <circle cx="60" cy="60" r="54" class="ring-progress" id="ringProgress"/>
+        </svg>
+        <div class="timer-text">
+          <span class="timer-count" id="timerCount">60</span>
+          <span class="timer-label">秒</span>
+        </div>
+      </div>
+      <div class="refresh-count">
+        <span>已刷新</span>
+        <strong id="refreshCount">0</strong>
+        <span>次</span>
+      </div>
+    </div>
+
+    <!-- Interval Setting -->
+    <div class="control-section">
+      <label class="field-label">刷新间隔（秒）</label>
+      <div class="interval-input-group">
+        <button class="btn-icon" id="decreaseBtn" title="减少">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <input type="number" id="intervalInput" min="1" max="86400" value="60" class="interval-input">
+        <button class="btn-icon" id="increaseBtn" title="增加">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+      <div class="quick-presets">
+        <button class="preset-btn" data-value="10">10s</button>
+        <button class="preset-btn" data-value="30">30s</button>
+        <button class="preset-btn active" data-value="60">60s</button>
+        <button class="preset-btn" data-value="120">2m</button>
+        <button class="preset-btn" data-value="300">5m</button>
+      </div>
+    </div>
+
+    <!-- Mode Selection -->
+    <div class="control-section">
+      <label class="field-label">刷新模式</label>
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="full">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+          全页刷新
+        </button>
+        <button class="mode-tab" data-mode="xpath">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+          XPath 点击
+        </button>
+      </div>
+    </div>
+
+    <!-- XPath Config (hidden by default) -->
+    <div class="xpath-section hidden" id="xpathSection">
+      <label class="field-label">XPath 表达式</label>
+      <div class="xpath-input-group">
+        <input type="text" id="xpathInput" placeholder="输入或选取 XPath..." class="xpath-input">
+        <button class="btn-pick" id="pickXpathBtn" title="从页面选取元素">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+          </svg>
+          选取
+        </button>
+      </div>
+      <div class="xpath-hint" id="xpathHint">
+        点击"选取"后在页面上点击目标元素
+      </div>
+
+      <!-- iframe Detection -->
+      <div class="iframe-section" id="iframeSection">
+        <label class="field-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          目标框架
+        </label>
+        <select id="frameSelect" class="frame-select">
+          <option value="top">主页面</option>
+        </select>
+        <div class="iframe-hint" id="iframeHint">检测到页面包含 iframe</div>
+      </div>
+    </div>
+
+    <!-- Control Buttons -->
+    <div class="action-section">
+      <button class="btn-start" id="startBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        启动刷新
+      </button>
+      <button class="btn-stop hidden" id="stopBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+        </svg>
+        停止刷新
+      </button>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+      <label class="field-label">运行日志</label>
+      <div class="log-list" id="logList">
+        <div class="log-empty">暂无日志</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
