@@ -11,7 +11,7 @@
       justify-content: center;
       align-items: center;
       min-height: 100vh;
-      background: #080c14;
+      background: #f0f2f5;
       margin: 0;
     }
     .preview-wrapper {
@@ -28,14 +28,14 @@
       font-size: 13px;
     }
     .preview-frame {
-      border: 1px solid #2d3a4f;
+      border: 1px solid #e2e8f0;
       border-radius: 16px;
       overflow: hidden;
-      box-shadow: 0 8px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(56, 189, 248, 0.1);
+      box-shadow: 0 8px 48px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(59, 130, 246, 0.05);
     }
     .preview-note {
       text-align: center;
-      color: #475569;
+      color: #94a3b8;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 12px;
       margin-top: 16px;
@@ -76,7 +76,7 @@
           <div class="refresh-count">
             <span>已刷新</span>
             <strong id="refreshCount">7</strong>
-            <span>次</span>
+            <span>次 / 上限 20 次</span>
           </div>
         </div>
 
@@ -87,7 +87,7 @@
             <button class="btn-icon" title="减少">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <input type="number" value="60" class="interval-input" disabled>
+            <input type="number" value="60" class="interval-input">
             <button class="btn-icon" title="增加">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
@@ -98,6 +98,15 @@
             <button class="preset-btn active">60s</button>
             <button class="preset-btn">2m</button>
             <button class="preset-btn">5m</button>
+          </div>
+        </div>
+
+        <!-- Max Refresh Count -->
+        <div class="control-section">
+          <label class="field-label">刷新次数上限</label>
+          <div class="count-input-group">
+            <input type="number" value="20" class="count-input" placeholder="0 = 无限制">
+            <span class="count-hint">0 表示无限制</span>
           </div>
         </div>
 
@@ -140,6 +149,10 @@
         <div class="log-section">
           <label class="field-label">运行日志</label>
           <div class="log-list">
+            <div class="log-item info">
+              <span class="log-time">14:32:45</span>
+              <span class="log-msg">间隔已热切换为 60 秒</span>
+            </div>
             <div class="log-item success">
               <span class="log-time">14:32:18</span>
               <span class="log-msg">第 7 次刷新完成</span>
@@ -148,13 +161,9 @@
               <span class="log-time">14:31:18</span>
               <span class="log-msg">第 6 次刷新完成</span>
             </div>
-            <div class="log-item success">
-              <span class="log-time">14:30:18</span>
-              <span class="log-msg">第 5 次刷新完成</span>
-            </div>
             <div class="log-item info">
               <span class="log-time">14:26:18</span>
-              <span class="log-msg">已启动 - 间隔 60 秒, 模式: 全页刷新</span>
+              <span class="log-msg">已启动 - 间隔 60 秒, 模式: 全页刷新, 上限 20 次</span>
             </div>
           </div>
         </div>

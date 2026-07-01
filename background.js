@@ -60,6 +60,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'UPDATE_MAX_COUNT': {
+      const activeTabId = getActiveTabId();
+      if (activeTabId && tabStates.has(activeTabId)) {
+        const ts = tabStates.get(activeTabId);
+        ts.maxCount = msg.maxCount || 0;
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     // Content script sends this when xpath is picked
     case 'XPATH_PICKED': {
       // Forward to popup
@@ -86,6 +96,7 @@ function startTimer(tabId, config) {
     xpath: config.xpath || '',
     targetFrame: config.targetFrame || 'top',
     refreshCount: 0,
+    maxCount: config.maxCount || 0, // 0 = unlimited
     nextTick: Date.now() + config.interval * 1000,
     timerId: null,
   };
@@ -135,6 +146,18 @@ function restartInterval(tabId) {
 async function executeTick(tabId) {
   const ts = tabStates.get(tabId);
   if (!ts) return;
+
+  // Check max count limit
+  if (ts.maxCount > 0 && ts.refreshCount >= ts.maxCount) {
+    stopTimer(tabId);
+    chrome.runtime.sendMessage({
+      type: 'REFRESH_DONE',
+      count: ts.refreshCount,
+      mode: ts.mode,
+      limitReached: true,
+    }).catch(() => {});
+    return;
+  }
 
   try {
     if (ts.mode === 'full') {

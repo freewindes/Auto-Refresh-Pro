@@ -25,6 +25,7 @@ const els = {
   iframeHint: document.getElementById('iframeHint'),
   logList: document.getElementById('logList'),
   presetBtns: document.querySelectorAll('.preset-btn'),
+  maxCountInput: document.getElementById('maxCountInput'),
 };
 
 // State
@@ -37,6 +38,7 @@ let state = {
   refreshCount: 0,
   remaining: 60,
   picking: false,
+  maxCount: 0, // 0 = unlimited
 };
 
 // Constants
@@ -54,7 +56,7 @@ async function init() {
 async function loadState() {
   try {
     const result = await chrome.storage.local.get([
-      'interval', 'mode', 'xpath', 'targetFrame', 'running', 'refreshCount'
+      'interval', 'mode', 'xpath', 'targetFrame', 'running', 'refreshCount', 'maxCount'
     ]);
     state.interval = result.interval || 60;
     state.mode = result.mode || 'full';
@@ -62,6 +64,7 @@ async function loadState() {
     state.targetFrame = result.targetFrame || 'top';
     state.running = result.running || false;
     state.refreshCount = result.refreshCount || 0;
+    state.maxCount = result.maxCount || 0;
     state.remaining = state.interval;
 
     // Sync countdown from background
@@ -86,6 +89,7 @@ async function saveState() {
       targetFrame: state.targetFrame,
       running: state.running,
       refreshCount: state.refreshCount,
+      maxCount: state.maxCount,
     });
   } catch (e) {
     console.error('Failed to save state:', e);
@@ -109,6 +113,9 @@ function bindEvents() {
       handleIntervalChange();
     });
   });
+
+  // Max count input
+  els.maxCountInput.addEventListener('change', handleMaxCountChange);
 
   // Mode tabs
   els.modeTabs.forEach(tab => {
@@ -151,12 +158,13 @@ function handleIntervalChange() {
   updateTimerDisplay();
   saveState();
 
-  // If running, restart timer with new interval
+  // Hot switch: update interval while running
   if (state.running) {
     chrome.runtime.sendMessage({
       type: 'UPDATE_INTERVAL',
       interval: state.interval,
     });
+    addLog(`间隔已热切换为 ${val} 秒`, 'info');
   }
 }
 
@@ -171,6 +179,33 @@ function adjustInterval(delta) {
   updatePresetHighlight(val);
   updateTimerDisplay();
   saveState();
+
+  // Hot switch: update interval while running
+  if (state.running) {
+    chrome.runtime.sendMessage({
+      type: 'UPDATE_INTERVAL',
+      interval: state.interval,
+    });
+    addLog(`间隔已热切换为 ${val} 秒`, 'info');
+  }
+}
+
+// ===== Max Count Controls =====
+function handleMaxCountChange() {
+  let val = parseInt(els.maxCountInput.value, 10);
+  if (isNaN(val) || val < 0) val = 0;
+  if (val > 99999) val = 99999;
+  state.maxCount = val;
+  els.maxCountInput.value = val;
+  saveState();
+
+  if (state.running) {
+    chrome.runtime.sendMessage({
+      type: 'UPDATE_MAX_COUNT',
+      maxCount: state.maxCount,
+    });
+    addLog(`刷新次数上限设为 ${val === 0 ? '无限制' : val}`, 'info');
+  }
 }
 
 function updatePresetHighlight(val) {
@@ -229,9 +264,11 @@ async function startRefresh() {
     mode: state.mode,
     xpath: state.xpath,
     targetFrame: state.targetFrame,
+    maxCount: state.maxCount,
   });
 
-  addLog(`已启动 - 间隔 ${state.interval} 秒, 模式: ${state.mode === 'full' ? '全页刷新' : 'XPath点击'}`, 'success');
+  const countText = state.maxCount > 0 ? `, 上限 ${state.maxCount} 次` : ', 无限制';
+  addLog(`已启动 - 间隔 ${state.interval} 秒, 模式: ${state.mode === 'full' ? '全页刷新' : 'XPath点击'}${countText}`, 'success');
   updateUI();
 }
 
@@ -306,6 +343,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     updateTimerDisplay();
     addLog(`第 ${msg.count} 次${msg.mode === 'full' ? '刷新' : '点击'}完成`, 'success');
     saveState();
+
+    // Check if max count reached
+    if (state.maxCount > 0 && state.refreshCount >= state.maxCount) {
+      addLog(`已达到刷新上限 ${state.maxCount} 次，自动停止`, 'info');
+      stopRefresh();
+    }
   } else if (msg.type === 'REFRESH_ERROR') {
     addLog(`执行失败: ${msg.error}`, 'error');
   } else if (msg.type === 'XPATH_PICKED') {
@@ -321,6 +364,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     els.xpathInput.value = msg.xpath;
     saveState();
     addLog(`已选取 XPath: ${msg.xpath}`, 'info');
+
+    // Auto-start refresh after XPath is picked
+    if (msg.xpath && !msg.cancelled) {
+      setTimeout(() => {
+        startRefresh();
+      }, 300);
+    }
   }
 });
 
@@ -344,6 +394,9 @@ function updateUI() {
   els.intervalInput.value = state.interval;
   updatePresetHighlight(state.interval);
 
+  // Max count
+  els.maxCountInput.value = state.maxCount;
+
   // XPath
   els.xpathInput.value = state.xpath;
 
@@ -353,11 +406,8 @@ function updateUI() {
   // Timer
   updateTimerDisplay();
 
-  // Disable controls while running
-  els.intervalInput.disabled = state.running;
-  els.decreaseBtn.disabled = state.running;
-  els.increaseBtn.disabled = state.running;
-  els.presetBtns.forEach(btn => btn.disabled = state.running);
+  // Hot switch: controls remain enabled while running
+  // (no disabled state - user can change interval/count at any time)
 }
 
 function updateTimerDisplay() {

@@ -1,25 +1,25 @@
 /* ===== CSS Variables & Base ===== */
 :root {
-  --bg-primary: #0f1729;
-  --bg-secondary: #1a2332;
-  --bg-card: #1e293b;
-  --bg-input: #0f172a;
-  --border-color: #2d3a4f;
-  --border-focus: #38bdf8;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-blue: #38bdf8;
-  --accent-cyan: #22d3ee;
-  --accent-indigo: #818cf8;
-  --accent-gradient: linear-gradient(135deg, #38bdf8, #818cf8);
-  --success: #34d399;
-  --danger: #f87171;
-  --warning: #fbbf24;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f1f5f9;
+  --bg-card: #f8fafc;
+  --bg-input: #ffffff;
+  --border-color: #e2e8f0;
+  --border-focus: #3b82f6;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --accent-blue: #3b82f6;
+  --accent-cyan: #06b6d4;
+  --accent-indigo: #6366f1;
+  --accent-gradient: linear-gradient(135deg, #3b82f6, #6366f1);
+  --success: #10b981;
+  --danger: #ef4444;
+  --warning: #f59e0b;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -72,16 +72,16 @@ body {
   border-radius: 20px;
   font-size: 12px;
   font-weight: 500;
-  background: rgba(100, 116, 139, 0.15);
+  background: rgba(148, 163, 184, 0.12);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
   transition: all 0.3s ease;
 }
 
 .status-badge.running {
-  background: rgba(52, 211, 153, 0.1);
+  background: rgba(16, 185, 129, 0.08);
   color: var(--success);
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: rgba(16, 185, 129, 0.25);
 }
 
 .status-dot {
@@ -94,7 +94,7 @@ body {
 
 .status-badge.running .status-dot {
   background: var(--success);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
   animation: pulse 2s infinite;
 }
 
@@ -223,7 +223,7 @@ body {
 .btn-icon:hover {
   border-color: var(--accent-blue);
   color: var(--accent-blue);
-  background: rgba(56, 189, 248, 0.1);
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .interval-input {
@@ -243,7 +243,7 @@ body {
 
 .interval-input:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 /* Remove number input arrows */
@@ -281,7 +281,7 @@ body {
 }
 
 .preset-btn.active {
-  background: rgba(56, 189, 248, 0.15);
+  background: rgba(59, 130, 246, 0.08);
   border-color: var(--accent-blue);
   color: var(--accent-blue);
 }
@@ -315,7 +315,7 @@ body {
 }
 
 .mode-tab.active {
-  background: rgba(56, 189, 248, 0.12);
+  background: rgba(59, 130, 246, 0.06);
   border-color: var(--accent-blue);
   color: var(--accent-blue);
 }
@@ -355,7 +355,7 @@ body {
 
 .xpath-input:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .btn-pick {
@@ -363,7 +363,7 @@ body {
   padding: 0 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--accent-indigo);
-  background: rgba(129, 140, 248, 0.12);
+  background: rgba(99, 102, 241, 0.06);
   color: var(--accent-indigo);
   font-size: 12px;
   font-weight: 600;
@@ -376,7 +376,7 @@ body {
 }
 
 .btn-pick:hover {
-  background: rgba(129, 140, 248, 0.2);
+  background: rgba(99, 102, 241, 0.12);
 }
 
 .btn-pick.picking {
@@ -470,11 +470,11 @@ body {
 .btn-start {
   background: var(--accent-gradient);
   color: #fff;
-  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.3);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.25);
 }
 
 .btn-start:hover {
-  box-shadow: 0 6px 24px rgba(56, 189, 248, 0.4);
+  box-shadow: 0 6px 24px rgba(59, 130, 246, 0.35);
   transform: translateY(-1px);
 }
 
@@ -483,13 +483,13 @@ body {
 }
 
 .btn-stop {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgba(239, 68, 68, 0.08);
   color: var(--danger);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .btn-stop:hover {
-  background: rgba(248, 113, 113, 0.25);
+  background: rgba(239, 68, 68, 0.15);
 }
 
 .hidden {
@@ -564,3 +564,44 @@ body {
 .log-item.success .log-msg { color: var(--success); }
 .log-item.error .log-msg { color: var(--danger); }
 .log-item.info .log-msg { color: var(--accent-blue); }
+
+/* ===== Count Input ===== */
+.count-input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.count-input {
+  width: 100px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: center;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.2s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.count-input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.count-input::-webkit-outer-spin-button,
+.count-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.count-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.count-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
