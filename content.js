@@ -270,12 +270,16 @@ function onPickerClick(e) {
   }
 
   const xpath = generateXPath(element);
+  const tagName = element.tagName.toLowerCase();
+  const textContent = (element.textContent || '').trim().substring(0, 50);
   stopPicker();
 
-  // Send xpath back to popup via background
+  // Send xpath back to popup via background with element info
   chrome.runtime.sendMessage({
     type: 'XPATH_PICKED',
     xpath: xpath,
+    tagName: tagName,
+    textContent: textContent,
   });
 }
 

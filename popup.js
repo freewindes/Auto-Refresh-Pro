@@ -117,14 +117,35 @@ function bindEvents() {
   // Max count input
   els.maxCountInput.addEventListener('change', handleMaxCountChange);
 
-  // Mode tabs
+  // Mode tabs - hot switch while running
   els.modeTabs.forEach(tab => {
     tab.addEventListener('click', () => {
-      state.mode = tab.dataset.mode;
+      const newMode = tab.dataset.mode;
+      if (newMode === state.mode) return;
+
+      state.mode = newMode;
       els.modeTabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       els.xpathSection.classList.toggle('hidden', state.mode !== 'xpath');
       saveState();
+
+      // Hot switch mode while running
+      if (state.running) {
+        if (state.mode === 'xpath' && !state.xpath) {
+          addLog('切换到 XPath 模式需要先选取表达式', 'error');
+          return;
+        }
+        chrome.runtime.sendMessage({
+          type: 'UPDATE_MODE',
+          mode: state.mode,
+          xpath: state.xpath,
+          targetFrame: state.targetFrame,
+        });
+        const modeLabel = state.mode === 'full' ? '全页刷新' : 'XPath 点击';
+        addLog(`模式已热切换为: ${modeLabel}`, 'info');
+        state.remaining = state.interval;
+        updateTimerDisplay();
+      }
     });
   });
 
@@ -323,9 +344,15 @@ function startCountdownSync() {
     try {
       const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
       if (status && status.running) {
-        state.remaining = status.remaining;
+        if (status.waitingForLoad) {
+          // Page is still loading after full refresh
+          els.timerCount.textContent = '...';
+          els.ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
+        } else {
+          state.remaining = status.remaining;
+          updateTimerDisplay();
+        }
         state.refreshCount = status.refreshCount || state.refreshCount;
-        updateTimerDisplay();
         els.refreshCount.textContent = state.refreshCount;
       }
     } catch (e) {
@@ -339,9 +366,18 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'REFRESH_DONE') {
     state.refreshCount = msg.count;
     els.refreshCount.textContent = state.refreshCount;
-    state.remaining = state.interval;
-    updateTimerDisplay();
-    addLog(`第 ${msg.count} 次${msg.mode === 'full' ? '刷新' : '点击'}完成`, 'success');
+
+    if (msg.waitingForLoad) {
+      // Full page refresh triggered, waiting for page to load
+      state.remaining = 0;
+      els.timerCount.textContent = '...';
+      els.ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
+      addLog(`第 ${msg.count} 次刷新已触发，等待页面加载...`, 'info');
+    } else {
+      state.remaining = state.interval;
+      updateTimerDisplay();
+      addLog(`第 ${msg.count} 次${msg.mode === 'full' ? '刷新' : '点击'}完成`, 'success');
+    }
     saveState();
 
     // Check if max count reached
@@ -349,6 +385,11 @@ chrome.runtime.onMessage.addListener((msg) => {
       addLog(`已达到刷新上限 ${state.maxCount} 次，自动停止`, 'info');
       stopRefresh();
     }
+  } else if (msg.type === 'PAGE_LOADED') {
+    // Page finished loading after full refresh, countdown restarted
+    state.remaining = state.interval;
+    updateTimerDisplay();
+    addLog('页面加载完成，倒计时重新开始', 'success');
   } else if (msg.type === 'REFRESH_ERROR') {
     addLog(`执行失败: ${msg.error}`, 'error');
   } else if (msg.type === 'XPATH_PICKED') {
@@ -365,8 +406,30 @@ chrome.runtime.onMessage.addListener((msg) => {
     saveState();
     addLog(`已选取 XPath: ${msg.xpath}`, 'info');
 
-    // Auto-start refresh after XPath is picked
+    // Show toast notification with element info
     if (msg.xpath && !msg.cancelled) {
+      showToast(msg);
+    }
+
+    // If running, hot-switch to xpath mode and continue
+    if (msg.xpath && !msg.cancelled && state.running) {
+      setTimeout(() => {
+        state.mode = 'xpath';
+        els.modeTabs.forEach(t => t.classList.toggle('active', t.dataset.mode === 'xpath'));
+        els.xpathSection.classList.remove('hidden');
+        chrome.runtime.sendMessage({
+          type: 'UPDATE_MODE',
+          mode: 'xpath',
+          xpath: state.xpath,
+          targetFrame: state.targetFrame,
+        });
+        state.remaining = state.interval;
+        updateTimerDisplay();
+        addLog('已自动切换到 XPath 点击模式', 'info');
+        saveState();
+      }, 300);
+    } else if (msg.xpath && !msg.cancelled && !state.running) {
+      // Not running - auto start
       setTimeout(() => {
         startRefresh();
       }, 300);
@@ -443,6 +506,53 @@ function addLog(message, type = 'info') {
   while (els.logList.children.length > 50) {
     els.logList.lastChild.remove();
   }
+}
+
+// ===== Toast Notification =====
+function showToast(msg) {
+  // Remove existing toast if any
+  const existing = document.querySelector('.toast-notification');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'toast-notification';
+
+  // Build element info
+  const tag = msg.tagName || 'unknown';
+  const text = msg.textContent ? msg.textContent.substring(0, 40) : '(empty)';
+  const xpath = msg.xpath || '';
+
+  toast.innerHTML = `
+    <div class="toast-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+    </div>
+    <div class="toast-content">
+      <div class="toast-title">XPath 元素选取成功</div>
+      <div class="toast-info">
+        <span class="toast-tag">&lt;${tag}&gt;</span>
+        <span class="toast-text">${text}</span>
+      </div>
+      <div class="toast-xpath" title="${xpath}">${xpath}</div>
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  `;
+
+  document.body.appendChild(toast);
+
+  // Auto-dismiss after 5 seconds
+  setTimeout(() => {
+    if (toast.parentElement) {
+      toast.classList.add('toast-dismiss');
+      setTimeout(() => toast.remove(), 300);
+    }
+  }, 5000);
 }
 
 // ===== Init =====

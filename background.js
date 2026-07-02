@@ -37,10 +37,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ts = tabStates.get(activeTabId);
         sendResponse({
           running: true,
-          remaining: Math.ceil((ts.nextTick - Date.now()) / 1000),
+          remaining: ts.waitingForLoad ? -1 : Math.ceil((ts.nextTick - Date.now()) / 1000),
           refreshCount: ts.refreshCount,
           interval: ts.interval,
           mode: ts.mode,
+          waitingForLoad: ts.waitingForLoad,
         });
       } else {
         sendResponse({ running: false });
@@ -70,12 +71,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'UPDATE_MODE': {
+      const activeTabId = getActiveTabId();
+      if (activeTabId && tabStates.has(activeTabId)) {
+        const ts = tabStates.get(activeTabId);
+        ts.mode = msg.mode;
+        if (msg.xpath !== undefined) ts.xpath = msg.xpath;
+        if (msg.targetFrame !== undefined) ts.targetFrame = msg.targetFrame;
+        // Reset countdown for new mode
+        ts.nextTick = Date.now() + ts.interval * 1000;
+        ts.waitingForLoad = false;
+        scheduleNextTick(activeTabId);
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     // Content script sends this when xpath is picked
     case 'XPATH_PICKED': {
-      // Forward to popup
+      // Forward to popup with element info
       chrome.runtime.sendMessage({
         type: 'XPATH_PICKED',
         xpath: msg.xpath,
+        tagName: msg.tagName || '',
+        textContent: msg.textContent || '',
       }).catch(() => {});
       break;
     }
@@ -99,6 +118,7 @@ function startTimer(tabId, config) {
     maxCount: config.maxCount || 0, // 0 = unlimited
     nextTick: Date.now() + config.interval * 1000,
     timerId: null,
+    waitingForLoad: false, // true when waiting for page to finish loading after full refresh
   };
 
   tabStates.set(tabId, ts);
@@ -162,20 +182,19 @@ async function executeTick(tabId) {
   try {
     if (ts.mode === 'full') {
       // Full page refresh
+      ts.waitingForLoad = true;
       await chrome.tabs.reload(tabId);
       ts.refreshCount++;
 
-      // After reload, we need to re-schedule since content script will be re-injected
-      // We store state and let the content script notify us when page is ready
-      // For now, schedule next tick
-      ts.nextTick = Date.now() + ts.interval * 1000;
-      scheduleNextTick(tabId);
+      // Don't schedule next tick yet - wait for page to finish loading
+      // The tabs.onUpdated listener will schedule it when status === 'complete'
 
-      // Notify popup
+      // Notify popup immediately that refresh was triggered
       chrome.runtime.sendMessage({
         type: 'REFRESH_DONE',
         count: ts.refreshCount,
         mode: 'full',
+        waitingForLoad: true,
       }).catch(() => {});
 
     } else if (ts.mode === 'xpath') {
@@ -215,11 +234,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'complete' && tabStates.has(tabId)) {
-    // Page reloaded - reschedule timer
     const ts = tabStates.get(tabId);
-    if (ts && ts.mode === 'full') {
+    if (ts && ts.waitingForLoad) {
+      // Page has finished loading after a full refresh
+      ts.waitingForLoad = false;
+      // Now start the countdown for the next refresh
       ts.nextTick = Date.now() + ts.interval * 1000;
       scheduleNextTick(tabId);
+
+      // Notify popup that page load is complete and countdown restarted
+      chrome.runtime.sendMessage({
+        type: 'PAGE_LOADED',
+        count: ts.refreshCount,
+      }).catch(() => {});
     }
   }
 });
