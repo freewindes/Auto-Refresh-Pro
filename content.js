@@ -119,9 +119,13 @@ function executeXPathClick(xpath, targetFrame) {
     element.dispatchEvent(event);
   });
 
-  // Also try native click if element supports it
+  // Also try native click if element supports it (may fail on CSP-restricted pages)
   if (typeof element.click === 'function') {
-    element.click();
+    try {
+      element.click();
+    } catch (e) {
+      // CSP may block javascript: URLs; dispatched events above already did the job
+    }
   }
 
   return {
@@ -294,11 +298,131 @@ function onPickerKeyDown(e) {
   }
 }
 
+// ===== Notification (shared positioning: bottom-right) =====
+function showNotification(msg, isError) {
+  const existing = document.getElementById('__auto_refresh_xpath_notification__');
+  if (existing) existing.remove();
+
+  const notification = document.createElement('div');
+  notification.id = '__auto_refresh_xpath_notification__';
+  notification.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 2147483647;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    background: #ffffff;
+    border: 1px solid ${isError ? 'rgba(239,68,68,0.3)' : '#e2e8f0'};
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px ${isError ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)'};
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+    max-width: 380px;
+    animation: arToastSlideIn 0.35s ease;
+  `;
+
+  // Icon
+  const icon = document.createElement('div');
+  icon.style.cssText = `
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: ${isError ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)'};
+    color: ${isError ? '#ef4444' : '#10b981'};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  if (isError) {
+    icon.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+  } else {
+    icon.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+  }
+
+  const content = document.createElement('div');
+  content.style.cssText = 'flex: 1; min-width: 0;';
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 4px;';
+  title.textContent = isError ? (msg.title || 'XPath 执行失败') : 'XPath 元素选取成功';
+
+  const msgLine = document.createElement('div');
+  msgLine.style.cssText = 'font-size: 12px; color: #64748b; margin-bottom: 6px; word-break: break-all;';
+
+  if (isError) {
+    msgLine.textContent = msg.message || msg.error || '未知错误';
+  } else {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'display: inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(99,102,241,0.08); color: #6366f1; font-size: 12px; font-weight: 600; font-family: monospace;';
+    tag.textContent = `<${msg.tagName || 'unknown'}>`;
+    const text = document.createElement('span');
+    text.style.cssText = 'margin-left: 6px; color: #64748b; font-size: 12px;';
+    text.textContent = (msg.textContent || '(empty)').substring(0, 50);
+    msgLine.appendChild(tag);
+    msgLine.appendChild(text);
+  }
+
+  const xpathOrError = document.createElement('div');
+  xpathOrError.style.cssText = 'font-size: 11px; color: #94a3b8; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; background: #f8fafc; border-radius: 6px; border: 1px solid #f1f5f9;';
+  xpathOrError.textContent = isError ? (msg.xpath || msg.message || '') : (msg.xpath || '');
+  xpathOrError.title = xpathOrError.textContent;
+
+  content.appendChild(title);
+  content.appendChild(msgLine);
+  content.appendChild(xpathOrError);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.style.cssText = 'flex-shrink: 0; width: 22px; height: 22px; border: none; background: transparent; color: #94a3b8; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; padding: 0; transition: all 0.2s;';
+  closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  closeBtn.addEventListener('click', () => notification.remove());
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = '#f1f5f9'; closeBtn.style.color = '#64748b'; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'transparent'; closeBtn.style.color = '#94a3b8'; });
+
+  notification.appendChild(icon);
+  notification.appendChild(content);
+  notification.appendChild(closeBtn);
+
+  const style = document.createElement('style');
+  style.id = '__auto_refresh_notif_style__';
+  style.textContent = `
+    @keyframes arToastSlideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes arToastSlideOut {
+      from { opacity: 1; transform: translateX(0); }
+      to { opacity: 0; transform: translateX(20px); }
+    }
+  `;
+  if (!document.getElementById('__auto_refresh_notif_style__')) {
+    document.head.appendChild(style);
+  }
+
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    if (notification.parentElement) {
+      notification.style.animation = 'arToastSlideOut 0.35s ease forwards';
+      setTimeout(() => { if (notification.parentElement) notification.remove(); }, 350);
+    }
+  }, isError ? 6000 : 5000);
+}
+
+function showXPathNotification(msg) {
+  showNotification(msg, false);
+}
+
+function showErrorNotification(msg) {
+  showNotification(msg, true);
+}
+
 // ===== Message Handler =====
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case 'DETECT_IFRAMES': {
-      // Only respond from top frame
       if (window === window.top) {
         const iframes = detectIframes();
         sendResponse({ iframes });
@@ -309,8 +433,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'EXECUTE_XPATH_CLICK': {
       try {
         const result = executeXPathClick(msg.xpath, msg.targetFrame);
+        // Report result back to background (to show webpage notification)
+        chrome.runtime.sendMessage({
+          type: 'XPATH_EXEC_RESULT',
+          success: true,
+          xpath: msg.xpath,
+          tagName: result.tag,
+          textContent: result.text,
+        }).catch(() => {});
         sendResponse({ success: true, element: result });
       } catch (e) {
+        // Report failure back to background (to show error notification)
+        chrome.runtime.sendMessage({
+          type: 'XPATH_EXEC_RESULT',
+          success: false,
+          xpath: msg.xpath,
+          error: e.message,
+        }).catch(() => {});
         sendResponse({ success: false, error: e.message });
       }
       break;
@@ -327,6 +466,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'STOP_PICKING': {
       if (window === window.top) {
         stopPicker();
+        sendResponse({ ok: true });
+      }
+      break;
+    }
+
+    case 'SHOW_XPATH_NOTIFICATION': {
+      if (window === window.top) {
+        showXPathNotification(msg);
+        sendResponse({ ok: true });
+      }
+      break;
+    }
+
+    case 'SHOW_ERROR_NOTIFICATION': {
+      if (window === window.top) {
+        showErrorNotification(msg);
         sendResponse({ ok: true });
       }
       break;

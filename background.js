@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Auto Refresh Pro - Background Service Worker
  * Manages timers and communicates between popup and content scripts
  */
@@ -12,7 +12,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   switch (msg.type) {
     case 'START': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (!activeTabId) {
         sendResponse({ error: 'No active tab' });
         return;
@@ -23,7 +23,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'STOP': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId) {
         stopTimer(activeTabId);
       }
@@ -32,7 +32,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'GET_STATUS': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
         sendResponse({
@@ -41,6 +41,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           refreshCount: ts.refreshCount,
           interval: ts.interval,
           mode: ts.mode,
+          xpath: ts.xpath,
+          targetFrame: ts.targetFrame,
+          maxCount: ts.maxCount,
           waitingForLoad: ts.waitingForLoad,
         });
       } else {
@@ -50,7 +53,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'UPDATE_INTERVAL': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
         ts.interval = msg.interval;
@@ -62,7 +65,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'UPDATE_MAX_COUNT': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
         ts.maxCount = msg.maxCount || 0;
@@ -72,7 +75,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'UPDATE_MODE': {
-      const activeTabId = getActiveTabId();
+      const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
         ts.mode = msg.mode;
@@ -89,14 +92,77 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Content script sends this when xpath is picked
     case 'XPATH_PICKED': {
+      // Resolve origin from sender tab (no async needed)
+      let origin = '';
+      try {
+        if (sender.tab && sender.tab.url) origin = new URL(sender.tab.url).origin;
+      } catch (e) { /* ignore */ }
+
       // Forward to popup with element info
       chrome.runtime.sendMessage({
         type: 'XPATH_PICKED',
         xpath: msg.xpath,
         tagName: msg.tagName || '',
         textContent: msg.textContent || '',
+        cancelled: msg.cancelled || false,
       }).catch(() => {});
+
+      // Persist to storage so popup can pick it up when reopened
+      if (msg.xpath && !msg.cancelled) {
+        chrome.storage.local.set({
+          pendingXpathPick: {
+            xpath: msg.xpath,
+            tagName: msg.tagName || '',
+            textContent: msg.textContent || '',
+            origin,
+            timestamp: Date.now(),
+          }
+        });
+      } else if (msg.cancelled) {
+        chrome.storage.local.remove('pendingXpathPick');
+      }
+
+      // Show success notification on webpage (only for pick, not for auto-refresh clicks)
+      if (msg.xpath && !msg.cancelled && tabId) {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'SHOW_XPATH_NOTIFICATION',
+          xpath: msg.xpath,
+          tagName: msg.tagName || '',
+          textContent: msg.textContent || '',
+        }).catch(() => {});
+      }
       break;
+    }
+
+    // Content script sends result from xpath click execution (during auto-refresh)
+    case 'XPATH_EXEC_RESULT': {
+      // No webpage notification — errors are logged to popup only
+      break;
+    }
+
+    // Popup asks background to start picker on active tab (popup will close itself)
+    case 'START_PICKER': {
+      const tabIdToUse = getTargetTabId(msg, sender);
+      if (tabIdToUse) {
+        chrome.tabs.sendMessage(tabIdToUse, { type: 'START_PICKING' }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
+    // Popup asks to cancel picking
+    case 'STOP_PICKER': {
+      const tabIdToUse = getTargetTabId(msg, sender);
+      if (tabIdToUse) {
+        chrome.tabs.sendMessage(tabIdToUse, { type: 'STOP_PICKING' }).catch(() => {});
+      }
+      break;
+    }
+
+    // Popup asks for all currently active refresh sessions
+    case 'GET_ACTIVE_SITES': {
+      getActiveSites().then((sites) => sendResponse({ sites }));
+      return true; // async sendResponse
     }
   }
 
@@ -106,7 +172,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ===== Timer Management =====
 function startTimer(tabId, config) {
   // Stop existing timer if any
-  stopTimer(tabId);
+  stopTimer(tabId, false);
 
   const ts = {
     tabId,
@@ -125,10 +191,11 @@ function startTimer(tabId, config) {
   scheduleNextTick(tabId);
 
   // Save running state
-  chrome.storage.local.set({ running: true });
+  syncRunningStorage();
+  notifyActiveSitesChanged();
 }
 
-function stopTimer(tabId) {
+function stopTimer(tabId, notify = true) {
   const ts = tabStates.get(tabId);
   if (ts) {
     if (ts.timerId) {
@@ -136,7 +203,9 @@ function stopTimer(tabId) {
     }
     tabStates.delete(tabId);
   }
-  chrome.storage.local.set({ running: false });
+  chrome.alarms.clear(`refresh-tick-${tabId}`).catch(() => {});
+  syncRunningStorage();
+  if (notify) notifyActiveSitesChanged();
 }
 
 function scheduleNextTick(tabId) {
@@ -167,11 +236,16 @@ async function executeTick(tabId) {
   const ts = tabStates.get(tabId);
   if (!ts) return;
 
+  // Prevent re-entrant calls (setTimeout + alarm race)
+  if (ts.ticking) return;
+  ts.ticking = true;
+
   // Check max count limit
   if (ts.maxCount > 0 && ts.refreshCount >= ts.maxCount) {
     stopTimer(tabId);
     chrome.runtime.sendMessage({
       type: 'REFRESH_DONE',
+      tabId,
       count: ts.refreshCount,
       mode: ts.mode,
       limitReached: true,
@@ -192,6 +266,7 @@ async function executeTick(tabId) {
       // Notify popup immediately that refresh was triggered
       chrome.runtime.sendMessage({
         type: 'REFRESH_DONE',
+        tabId,
         count: ts.refreshCount,
         mode: 'full',
         waitingForLoad: true,
@@ -211,6 +286,7 @@ async function executeTick(tabId) {
 
       chrome.runtime.sendMessage({
         type: 'REFRESH_DONE',
+        tabId,
         count: ts.refreshCount,
         mode: 'xpath',
       }).catch(() => {});
@@ -225,6 +301,7 @@ async function executeTick(tabId) {
     ts.nextTick = Date.now() + ts.interval * 1000;
     scheduleNextTick(tabId);
   }
+  ts.ticking = false;
 }
 
 // ===== Tab Lifecycle =====
@@ -245,6 +322,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       // Notify popup that page load is complete and countdown restarted
       chrome.runtime.sendMessage({
         type: 'PAGE_LOADED',
+        tabId,
         count: ts.refreshCount,
       }).catch(() => {});
     }
@@ -258,6 +336,49 @@ function getActiveTabId() {
   return currentActiveTabId;
 }
 
+function getTargetTabId(msg, sender) {
+  return msg.tabId || sender.tab?.id || currentActiveTabId;
+}
+
+async function getActiveSites() {
+  const sites = [];
+  const entries = Array.from(tabStates.entries());
+
+  for (const [tabId, ts] of entries) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab) {
+        stopTimer(tabId);
+        continue;
+      }
+
+      sites.push({
+        tabId,
+        url: tab.url || '',
+        title: tab.title || '',
+        mode: ts.mode,
+        xpath: ts.xpath,
+        interval: ts.interval,
+        refreshCount: ts.refreshCount,
+      });
+    } catch (e) {
+      stopTimer(tabId);
+    }
+  }
+
+  return sites;
+}
+
+function syncRunningStorage() {
+  chrome.storage.local.set({ running: tabStates.size > 0 });
+}
+
+function notifyActiveSitesChanged() {
+  chrome.runtime.sendMessage({
+    type: 'ACTIVE_SITES_CHANGED',
+    count: tabStates.size,
+  }).catch(() => {});
+}
 let currentActiveTabId = null;
 
 // Track active tab
@@ -291,5 +412,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (ts && Date.now() >= ts.nextTick) {
       executeTick(tabId);
     }
+  }
+});
+
+// ===== Storage watch — popup writes pickingRequested then closes =====
+// Double-path insurance: message handler above handles START_PICKER, this handles dormant-SW case
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.pickingRequested && changes.pickingRequested.newValue) {
+    const tabId = getActiveTabId();
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { type: 'START_PICKING' }).catch(() => {});
+    } else {
+      // Fallback: query the active tab directly
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'START_PICKING' }).catch(() => {});
+        }
+      });
+    }
+    chrome.storage.local.remove('pickingRequested').catch(() => {});
   }
 });
