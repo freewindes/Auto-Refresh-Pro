@@ -1,3 +1,4 @@
+<div align="center">
 # 🚀 **Auto Refresh Pro**
 
 **智能网页自动刷新扩展**  
@@ -8,6 +9,7 @@
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge)
 
 > 定时刷新、XPath 智能点击、实时内容变化监控、悬浮控制窗 —— 让网页保持最新状态。
+</div>
 
 ---
 
