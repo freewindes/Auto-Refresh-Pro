@@ -12,16 +12,17 @@
     <img src="https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome" alt="Chrome">
     <img src="https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge" alt="Manifest V3">
   </p>
+  定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗
 </div>
 
-> 定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗
+
 
 ---
 
 ## 🌌 **功能矩阵**
 
 <div align="center">
-  <img src="https://via.placeholder.com/860x420/1a1a2e/00d4ff?text=Auto+Refresh+Pro+主界面" alt="Auto Refresh Pro Interface" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);">
+
 
 | 特性 | 描述 |
 |------|------|
