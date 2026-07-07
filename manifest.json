@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Auto Refresh Pro",
-  "version": "1.0.6",
-  "description": "网页定时自动刷新工具，支持全页刷新、XPath 模拟点击、iframe 检测和监控变化提醒",
+  "version": "1.0.11",
+  "description": "网页定时自动刷新工具，支持全页刷新、XPath 模拟点击、iframe 检测和监控模式提醒",
   "permissions": [
     "storage",
     "activeTab",

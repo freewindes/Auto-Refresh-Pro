@@ -13,6 +13,8 @@ const els = {
   intervalInput: document.getElementById('intervalInput'),
   decreaseBtn: document.getElementById('decreaseBtn'),
   increaseBtn: document.getElementById('increaseBtn'),
+  maxCountToggle: document.getElementById('maxCountToggle'),
+  maxCountBody: document.getElementById('maxCountBody'),
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   modeTabs: document.querySelectorAll('.mode-tab'),
@@ -26,9 +28,13 @@ const els = {
   pickMonitorXpathBtn: document.getElementById('pickMonitorXpathBtn'),
   monitorXpathHint: document.getElementById('monitorXpathHint'),
   voiceNotifyToggle: document.getElementById('voiceNotifyToggle'),
+  voiceNotifyBody: document.getElementById('voiceNotifyBody'),
+  voiceNotifyMessageInput: document.getElementById('voiceNotifyMessageInput'),
   popupNotifyToggle: document.getElementById('popupNotifyToggle'),
+  popupNotifyBody: document.getElementById('popupNotifyBody'),
   monitorNotifyMessageInput: document.getElementById('monitorNotifyMessageInput'),
   floatWindowToggle: document.getElementById('floatWindowToggle'),
+  showTimerToggle: document.getElementById('showTimerToggle'),
   logList: document.getElementById('logList'),
   sitesList: document.getElementById('sitesList'),
   sitesTab: document.getElementById('sitesTab'),
@@ -54,18 +60,22 @@ let state = {
   pickingClick: false,
   pickingMonitor: false,
   pickingFor: 'click', // 'click' or 'monitor'
+  maxCountEnabled: false,
   maxCount: 0,
   tabId: null,
   monitorEnabled: false,
   monitorXpath: '',
   voiceNotifyEnabled: false,
+  voiceNotifyMessage: '',
   popupNotifyEnabled: false,
   monitorNotifyMessage: '',
   floatWindowEnabled: false,
+  showTimerEnabled: false,
 };
 
 // Constants
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
+const DEFAULT_VOICE_NOTIFY_MESSAGE = '监控区域内容已发生变化';
 const DEFAULT_MONITOR_NOTIFY_MESSAGE = '监控区域发生变化，请及时查看。';
 
 function getUrlCacheKey(url) {
@@ -76,6 +86,10 @@ function getUrlCacheKey(url) {
   } catch (e) {
     return url || '';
   }
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
 }
 
 // ===== Initialization =====
@@ -90,30 +104,39 @@ async function init() {
 async function loadState() {
   try {
     const result = await chrome.storage.local.get([
-      'interval', 'mode', 'xpathCache', 'targetFrame', 'maxCount', 'pendingXpathPick',
+      'interval', 'mode', 'xpathCache', 'targetFrame', 'maxCountEnabled', 'maxCount', 'maxCountCache', 'pendingXpathPick',
       'pendingClickXpathPick', 'pendingMonitorXpathPick',
       'monitorEnabled', 'monitorXpath', 'voiceNotifyEnabled', 'popupNotifyEnabled',
-      'floatWindowEnabled', 'monitorXpathCache', 'monitorNotifyMessageCache', 'floatWindowCache'
+      'floatWindowEnabled', 'monitorXpathCache', 'voiceNotifyMessageCache', 'monitorNotifyMessageCache', 'floatWindowCache',
+      'siteSettingsCache'
     ]);
+    const maxCountCache = result.maxCountCache || {};
+
     state.interval = result.interval || 60;
     state.mode = result.mode || 'full';
     state.targetFrame = result.targetFrame || 'top';
     state.running = false;
     state.refreshCount = 0;
-    state.maxCount = result.maxCount || 0;
+    state.maxCount = result.maxCount !== undefined ? Number(result.maxCount) || 10 : 10;
+    state.maxCountEnabled = result.maxCountEnabled !== undefined
+      ? !!result.maxCountEnabled
+      : false;
     state.remaining = state.interval;
     state.monitorEnabled = result.monitorEnabled || false;
     state.monitorXpath = '';
     state.voiceNotifyEnabled = result.voiceNotifyEnabled || false;
+    state.voiceNotifyMessage = DEFAULT_VOICE_NOTIFY_MESSAGE;
     state.popupNotifyEnabled = result.popupNotifyEnabled || false;
     state.monitorNotifyMessage = DEFAULT_MONITOR_NOTIFY_MESSAGE;
     state.floatWindowEnabled = false;
 
-    // Resolve current tab's origin for per-site xpath cache
+    // Resolve current tab's origin for per-site xpath and max count cache
     const xpathCache = result.xpathCache || {};
     const monitorXpathCache = result.monitorXpathCache || {};
+    const voiceNotifyMessageCache = result.voiceNotifyMessageCache || {};
     const monitorNotifyMessageCache = result.monitorNotifyMessageCache || {};
     const floatWindowCache = result.floatWindowCache || {};
+    const siteSettingsCache = result.siteSettingsCache || {};
     let origin = '';
     let pageKey = '';
     try {
@@ -127,6 +150,41 @@ async function loadState() {
       }
     } catch (e) { /* ignore */ }
 
+    const siteSettings = pageKey ? (siteSettingsCache[pageKey] || {}) : {};
+    const cachedXpath = pageKey ? (xpathCache[pageKey] || (origin ? xpathCache[origin] : '')) : '';
+    const cachedMaxCount = pageKey
+      ? (maxCountCache[pageKey] !== undefined ? maxCountCache[pageKey] : (origin ? maxCountCache[origin] : undefined))
+      : undefined;
+
+    if (siteSettings.interval !== undefined) state.interval = Number(siteSettings.interval) || 60;
+    if (siteSettings.mode !== undefined) state.mode = siteSettings.mode || 'full';
+    if (siteSettings.xpath !== undefined) state.xpath = siteSettings.xpath || '';
+    if (siteSettings.targetFrame !== undefined) state.targetFrame = siteSettings.targetFrame || 'top';
+    if (siteSettings.monitorEnabled !== undefined) state.monitorEnabled = !!siteSettings.monitorEnabled;
+    if (siteSettings.monitorXpath !== undefined) state.monitorXpath = siteSettings.monitorXpath || '';
+    if (siteSettings.voiceNotifyEnabled !== undefined) state.voiceNotifyEnabled = !!siteSettings.voiceNotifyEnabled;
+    if (siteSettings.voiceNotifyMessage !== undefined) {
+      state.voiceNotifyMessage = siteSettings.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
+    }
+    if (siteSettings.popupNotifyEnabled !== undefined) state.popupNotifyEnabled = !!siteSettings.popupNotifyEnabled;
+    if (siteSettings.monitorNotifyMessage !== undefined) {
+      state.monitorNotifyMessage = siteSettings.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
+    }
+    if (siteSettings.floatWindowEnabled !== undefined) state.floatWindowEnabled = !!siteSettings.floatWindowEnabled;
+    if (siteSettings.showTimerEnabled !== undefined) state.showTimerEnabled = !!siteSettings.showTimerEnabled;
+    if (siteSettings.maxCountEnabled !== undefined) state.maxCountEnabled = !!siteSettings.maxCountEnabled;
+    if (siteSettings.maxCount !== undefined) state.maxCount = Number(siteSettings.maxCount) || 0;
+
+    if (siteSettings.xpath === undefined && cachedXpath) {
+      state.xpath = cachedXpath !== '__full__' ? cachedXpath : '';
+      if (cachedXpath === '__full__') state.mode = 'full';
+    }
+    if (cachedMaxCount !== undefined && !hasOwn(siteSettings, 'maxCountEnabled') && !hasOwn(siteSettings, 'maxCount')) {
+      state.maxCountEnabled = !!cachedMaxCount.enabled;
+      state.maxCount = Number(cachedMaxCount.count) || 0;
+    }
+    state.remaining = state.interval;
+
     // STEP 1: Get running status from background first
     const statusResult = await chrome.runtime.sendMessage({ type: 'GET_STATUS', tabId: state.tabId });
     if (statusResult && statusResult.running) {
@@ -137,10 +195,12 @@ async function loadState() {
       if (statusResult.mode !== undefined) state.mode = statusResult.mode;
       if (statusResult.xpath !== undefined) state.xpath = statusResult.xpath;
       if (statusResult.targetFrame !== undefined) state.targetFrame = statusResult.targetFrame;
+      if (statusResult.maxCountEnabled !== undefined) state.maxCountEnabled = statusResult.maxCountEnabled;
       if (statusResult.maxCount !== undefined) state.maxCount = statusResult.maxCount;
       if (statusResult.monitorEnabled !== undefined) state.monitorEnabled = statusResult.monitorEnabled;
       if (statusResult.monitorXpath !== undefined) state.monitorXpath = statusResult.monitorXpath;
       if (statusResult.voiceNotifyEnabled !== undefined) state.voiceNotifyEnabled = statusResult.voiceNotifyEnabled;
+      if (statusResult.voiceNotifyMessage !== undefined) state.voiceNotifyMessage = statusResult.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
       if (statusResult.popupNotifyEnabled !== undefined) state.popupNotifyEnabled = statusResult.popupNotifyEnabled;
       if (statusResult.monitorNotifyMessage !== undefined) state.monitorNotifyMessage = statusResult.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
       if (statusResult.floatWindowEnabled !== undefined) state.floatWindowEnabled = statusResult.floatWindowEnabled;
@@ -154,9 +214,20 @@ async function loadState() {
     if (result.pendingClickXpathPick && result.pendingClickXpathPick.xpath) {
       const pick = result.pendingClickXpathPick;
       if (Date.now() - pick.timestamp < 30000) {
+        const pickPageKey = pick.urlKey || pageKey;
         const pickOrigin = pick.origin || origin;
-        xpathCache[pickOrigin] = pick.xpath;
-        await chrome.storage.local.set({ xpathCache });
+        if (pickPageKey) {
+          siteSettingsCache[pickPageKey] = {
+            ...(siteSettingsCache[pickPageKey] || {}),
+            mode: 'xpath',
+            xpath: pick.xpath,
+            targetFrame: pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top',
+          };
+          xpathCache[pickPageKey] = pick.xpath;
+        } else if (pickOrigin) {
+          xpathCache[pickOrigin] = pick.xpath;
+        }
+        await chrome.storage.local.set({ siteSettingsCache, xpathCache });
 
         state.xpath = pick.xpath;
         state.mode = 'xpath';
@@ -174,8 +245,13 @@ async function loadState() {
       if (Date.now() - pick.timestamp < 30000) {
         const pickPageKey = pick.urlKey || pageKey;
         if (pickPageKey) {
+          siteSettingsCache[pickPageKey] = {
+            ...(siteSettingsCache[pickPageKey] || {}),
+            monitorEnabled: true,
+            monitorXpath: pick.xpath,
+          };
           monitorXpathCache[pickPageKey] = pick.xpath;
-          await chrome.storage.local.set({ monitorXpathCache });
+          await chrome.storage.local.set({ siteSettingsCache, monitorXpathCache });
         }
         state.monitorXpath = pick.xpath;
         state.monitorEnabled = true;
@@ -193,8 +269,13 @@ async function loadState() {
           if (!state.monitorXpath) {
             const pickPageKey = pick.urlKey || pageKey;
             if (pickPageKey) {
+              siteSettingsCache[pickPageKey] = {
+                ...(siteSettingsCache[pickPageKey] || {}),
+                monitorEnabled: true,
+                monitorXpath: pick.xpath,
+              };
               monitorXpathCache[pickPageKey] = pick.xpath;
-              await chrome.storage.local.set({ monitorXpathCache });
+              await chrome.storage.local.set({ siteSettingsCache, monitorXpathCache });
             }
             state.monitorXpath = pick.xpath;
             state.monitorEnabled = true;
@@ -202,9 +283,20 @@ async function loadState() {
           }
         } else {
           if (!state.xpath) {
+            const pickPageKey = pick.urlKey || pageKey;
             const pickOrigin = pick.origin || origin;
-            xpathCache[pickOrigin] = pick.xpath;
-            await chrome.storage.local.set({ xpathCache });
+            if (pickPageKey) {
+              siteSettingsCache[pickPageKey] = {
+                ...(siteSettingsCache[pickPageKey] || {}),
+                mode: 'xpath',
+                xpath: pick.xpath,
+                targetFrame: pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top',
+              };
+              xpathCache[pickPageKey] = pick.xpath;
+            } else if (pickOrigin) {
+              xpathCache[pickOrigin] = pick.xpath;
+            }
+            await chrome.storage.local.set({ siteSettingsCache, xpathCache });
 
             state.xpath = pick.xpath;
             state.mode = 'xpath';
@@ -216,21 +308,26 @@ async function loadState() {
         }
       }
       chrome.storage.local.remove('pendingXpathPick').catch(() => {});
-    } else if (origin && !state.xpath) {
-      const cachedXpath = xpathCache[origin];
+    } else if (!hasOwn(siteSettings, 'xpath') && (pageKey || origin) && !state.xpath) {
+      const cachedXpath = pageKey ? (xpathCache[pageKey] || (origin ? xpathCache[origin] : '')) : xpathCache[origin];
       state.xpath = cachedXpath && cachedXpath !== '__full__' ? cachedXpath : '';
       if (!state.xpath && state.mode === 'xpath') {
         state.mode = 'full';
       }
     }
 
-    if (!state.running && pageKey && !state.monitorXpath) {
+    if (!state.running && pageKey && !state.monitorXpath && !hasOwn(siteSettings, 'monitorXpath')) {
       state.monitorXpath = monitorXpathCache[pageKey] || '';
     }
     if (!state.running && pageKey) {
-      state.monitorNotifyMessage = monitorNotifyMessageCache[pageKey] || DEFAULT_MONITOR_NOTIFY_MESSAGE;
+      if (!hasOwn(siteSettings, 'voiceNotifyMessage')) {
+        state.voiceNotifyMessage = voiceNotifyMessageCache[pageKey] || DEFAULT_VOICE_NOTIFY_MESSAGE;
+      }
+      if (!hasOwn(siteSettings, 'monitorNotifyMessage')) {
+        state.monitorNotifyMessage = monitorNotifyMessageCache[pageKey] || DEFAULT_MONITOR_NOTIFY_MESSAGE;
+      }
     }
-    if (!state.running) {
+    if (!state.running && !hasOwn(siteSettings, 'floatWindowEnabled')) {
       state.floatWindowEnabled = pageKey
         ? !!floatWindowCache[pageKey]
         : !!result.floatWindowEnabled;
@@ -253,23 +350,61 @@ async function saveState() {
       }
     } catch (e) { /* ignore */ }
 
-    const storageResult = await chrome.storage.local.get(['xpathCache', 'monitorXpathCache', 'monitorNotifyMessageCache', 'floatWindowCache']);
+    const storageResult = await chrome.storage.local.get([
+      'siteSettingsCache',
+      'xpathCache',
+      'monitorXpathCache',
+      'voiceNotifyMessageCache',
+      'monitorNotifyMessageCache',
+      'floatWindowCache',
+      'maxCountCache'
+    ]);
+    const siteSettingsCache = storageResult.siteSettingsCache || {};
     const xpathCache = storageResult.xpathCache || {};
     const monitorXpathCache = storageResult.monitorXpathCache || {};
+    const voiceNotifyMessageCache = storageResult.voiceNotifyMessageCache || {};
     const monitorNotifyMessageCache = storageResult.monitorNotifyMessageCache || {};
     const floatWindowCache = storageResult.floatWindowCache || {};
-    if (origin) {
-      if (state.mode === 'full') {
-        xpathCache[origin] = '__full__';
-      } else if (state.xpath) {
-        xpathCache[origin] = state.xpath;
-      }
-    }
+    const maxCountCache = storageResult.maxCountCache || {};
     if (pageKey) {
+      siteSettingsCache[pageKey] = {
+        interval: state.interval,
+        mode: state.mode,
+        xpath: state.xpath,
+        targetFrame: state.targetFrame,
+        maxCountEnabled: state.maxCountEnabled,
+        maxCount: state.maxCount,
+        monitorEnabled: state.monitorEnabled,
+        monitorXpath: state.monitorXpath,
+        voiceNotifyEnabled: state.voiceNotifyEnabled,
+        voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
+        popupNotifyEnabled: state.popupNotifyEnabled,
+        monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
+        floatWindowEnabled: state.floatWindowEnabled,
+        showTimerEnabled: state.showTimerEnabled,
+      };
+
+      if (state.mode === 'full') {
+        xpathCache[pageKey] = '__full__';
+      } else if (state.xpath) {
+        xpathCache[pageKey] = state.xpath;
+      } else {
+        delete xpathCache[pageKey];
+      }
+      maxCountCache[pageKey] = {
+        enabled: state.maxCountEnabled,
+        count: state.maxCount,
+      };
       if (state.monitorXpath) {
         monitorXpathCache[pageKey] = state.monitorXpath;
       } else {
         delete monitorXpathCache[pageKey];
+      }
+      const voiceMessage = (state.voiceNotifyMessage || '').trim();
+      if (voiceMessage && voiceMessage !== DEFAULT_VOICE_NOTIFY_MESSAGE) {
+        voiceNotifyMessageCache[pageKey] = voiceMessage;
+      } else {
+        delete voiceNotifyMessageCache[pageKey];
       }
       const notifyMessage = (state.monitorNotifyMessage || '').trim();
       if (notifyMessage && notifyMessage !== DEFAULT_MONITOR_NOTIFY_MESSAGE) {
@@ -281,20 +416,28 @@ async function saveState() {
     }
 
     await chrome.storage.local.set({
-      interval: state.interval,
-      mode: state.mode,
+      siteSettingsCache,
       xpathCache,
       monitorXpathCache,
+      voiceNotifyMessageCache,
       monitorNotifyMessageCache,
       floatWindowCache,
-      targetFrame: state.targetFrame,
-      maxCount: state.maxCount,
-      monitorEnabled: state.monitorEnabled,
-      monitorXpath: state.monitorXpath,
-      voiceNotifyEnabled: state.voiceNotifyEnabled,
-      popupNotifyEnabled: state.popupNotifyEnabled,
-      floatWindowEnabled: state.floatWindowEnabled,
+      maxCountCache,
     });
+    await chrome.storage.local.remove([
+      'interval',
+      'mode',
+      'targetFrame',
+      'maxCountEnabled',
+      'maxCount',
+      'monitorEnabled',
+      'monitorXpath',
+      'voiceNotifyEnabled',
+      'popupNotifyEnabled',
+      'floatWindowEnabled',
+      'showTimerEnabled',
+      'alertSettingsEnabled'
+    ]);
   } catch (e) {
     console.error('Failed to save state:', e);
   }
@@ -317,22 +460,35 @@ function getMonitorNotifyMessage() {
   return (raw || '').trim() || DEFAULT_MONITOR_NOTIFY_MESSAGE;
 }
 
+function getVoiceNotifyMessage() {
+  const raw = els.voiceNotifyMessageInput
+    ? els.voiceNotifyMessageInput.value
+    : state.voiceNotifyMessage;
+  return (raw || '').trim() || DEFAULT_VOICE_NOTIFY_MESSAGE;
+}
+
 function sendNotifyUpdate() {
   if (!state.running) return;
   chrome.runtime.sendMessage({
     type: 'UPDATE_NOTIFY',
     tabId: state.tabId,
     voiceNotifyEnabled: state.voiceNotifyEnabled,
+    voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
     popupNotifyEnabled: state.popupNotifyEnabled,
     monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
   });
 }
 
-function updateNotifyMessageEditor() {
-  const enabled = !!state.popupNotifyEnabled;
-  els.monitorNotifyMessageInput.disabled = !enabled;
-  const field = els.monitorNotifyMessageInput.closest('.notify-message-field');
-  if (field) field.classList.toggle('disabled', !enabled);
+function updateMaxCountEditor() {
+  els.maxCountToggle.checked = state.maxCountEnabled;
+  els.maxCountBody.classList.toggle('hidden', !state.maxCountEnabled);
+}
+
+function updateMonitorModuleEditors() {
+  els.voiceNotifyToggle.checked = state.voiceNotifyEnabled;
+  els.popupNotifyToggle.checked = state.popupNotifyEnabled;
+  els.voiceNotifyBody.classList.toggle('hidden', !state.voiceNotifyEnabled);
+  els.popupNotifyBody.classList.toggle('hidden', !state.popupNotifyEnabled);
 }
 
 // ===== Event Binding =====
@@ -349,6 +505,21 @@ function bindEvents() {
       updatePresetHighlight(val);
       handleIntervalChange();
     });
+  });
+
+  els.maxCountToggle.addEventListener('change', () => {
+    state.maxCountEnabled = els.maxCountToggle.checked;
+    updateMaxCountEditor();
+    saveState();
+    if (state.running) {
+      chrome.runtime.sendMessage({
+        type: 'UPDATE_MAX_COUNT',
+        tabId: state.tabId,
+        maxCountEnabled: state.maxCountEnabled,
+        maxCount: state.maxCount,
+      });
+      addLog(state.maxCountEnabled ? `刷新上限已开启: ${state.maxCount || 0} 次` : '刷新上限已关闭', 'info');
+    }
   });
 
   els.maxCountInput.addEventListener('change', handleMaxCountChange);
@@ -422,6 +593,7 @@ function bindEvents() {
         tabId: state.tabId,
         monitorEnabled: state.monitorEnabled,
         monitorXpath: state.monitorXpath,
+        voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
         monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
       });
       addLog(state.monitorEnabled ? '监控模式已启用' : '监控模式已关闭', 'info');
@@ -430,13 +602,20 @@ function bindEvents() {
 
   els.voiceNotifyToggle.addEventListener('change', () => {
     state.voiceNotifyEnabled = els.voiceNotifyToggle.checked;
+    updateMonitorModuleEditors();
+    saveState();
+    sendNotifyUpdate();
+  });
+
+  els.voiceNotifyMessageInput.addEventListener('input', () => {
+    state.voiceNotifyMessage = getVoiceNotifyMessage();
     saveState();
     sendNotifyUpdate();
   });
 
   els.popupNotifyToggle.addEventListener('change', () => {
     state.popupNotifyEnabled = els.popupNotifyToggle.checked;
-    updateNotifyMessageEditor();
+    updateMonitorModuleEditors();
     saveState();
     sendNotifyUpdate();
   });
@@ -452,6 +631,18 @@ function bindEvents() {
     saveState();
     syncFloatWindowForCurrentTab();
     addLog(state.floatWindowEnabled ? '悬浮窗已启用' : '悬浮窗已关闭', 'info');
+  });
+
+  els.showTimerToggle.addEventListener('change', () => {
+    state.showTimerEnabled = els.showTimerToggle.checked;
+    saveState();
+    if (state.running) {
+      chrome.runtime.sendMessage({
+        type: 'UPDATE_SHOW_TIMER',
+        tabId: state.tabId,
+        showTimerEnabled: state.showTimerEnabled,
+      }).catch(() => {});
+    }
   });
 
   els.startBtn.addEventListener('click', startRefresh);
@@ -536,9 +727,10 @@ function handleMaxCountChange() {
     chrome.runtime.sendMessage({
       type: 'UPDATE_MAX_COUNT',
       tabId: state.tabId,
+      maxCountEnabled: state.maxCountEnabled,
       maxCount: state.maxCount,
     });
-    addLog(`刷新次数上限设为 ${val === 0 ? '无限制' : val}`, 'info');
+    addLog(state.maxCountEnabled ? `刷新次数上限设为 ${val === 0 ? '无限制' : val}` : '刷新上限已关闭', 'info');
   }
 }
 
@@ -624,7 +816,7 @@ async function startRefresh() {
     addLog('监控模式已启用但未设置监控区域 XPath', 'error');
     await showPageErrorNotification(
       '监控 XPath 为空',
-      '监控变化已开启，请先点击「选取」按钮选择监控区域，或手动输入监控区域 XPath'
+      '监控模式已开启，请先点击「选取」按钮选择监控区域，或手动输入监控区域 XPath'
     );
     return;
   }
@@ -641,16 +833,19 @@ async function startRefresh() {
     mode: state.mode,
     xpath: state.xpath,
     targetFrame: state.targetFrame,
+    maxCountEnabled: state.maxCountEnabled,
     maxCount: state.maxCount,
     monitorEnabled: state.monitorEnabled,
     monitorXpath: state.monitorXpath,
     voiceNotifyEnabled: state.voiceNotifyEnabled,
+    voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
     popupNotifyEnabled: state.popupNotifyEnabled,
     monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
     floatWindowEnabled: state.floatWindowEnabled,
+    showTimerEnabled: state.showTimerEnabled,
   });
 
-  const countText = state.maxCount > 0 ? `, 上限 ${state.maxCount} 次` : ', 无限制';
+  const countText = state.maxCountEnabled ? `, 上限 ${state.maxCount || 0} 次` : ', 无刷新上限';
   const monitorText = state.monitorEnabled ? ', 监控模式已开启' : '';
   addLog(`已启动 - 间隔 ${state.interval} 秒, 模式: ${state.mode === 'full' ? '全页刷新' : 'XPath点击'}${countText}${monitorText}`, 'success');
   updateUI();
@@ -735,7 +930,7 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     }
     saveState();
 
-    if (state.maxCount > 0 && state.refreshCount >= state.maxCount) {
+    if (state.maxCountEnabled && state.maxCount > 0 && state.refreshCount >= state.maxCount) {
       addLog(`已达到刷新上限 ${state.maxCount} 次，自动停止`, 'info');
       stopRefresh();
     }
@@ -818,6 +1013,8 @@ chrome.runtime.onMessage.addListener(async (msg) => {
             tabId: state.tabId,
             monitorEnabled: state.monitorEnabled,
             monitorXpath: state.monitorXpath,
+            voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
+            monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
           });
         }
       }
@@ -851,6 +1048,7 @@ function updateUI() {
   updatePresetHighlight(state.interval);
 
   els.maxCountInput.value = state.maxCount;
+  updateMaxCountEditor();
 
   els.xpathInput.value = state.xpath;
   // Fix: update xpathHint based on whether xpath is set
@@ -890,13 +1088,13 @@ function updateUI() {
       </svg>选取`;
   }
 
-  els.voiceNotifyToggle.checked = state.voiceNotifyEnabled;
-  els.popupNotifyToggle.checked = state.popupNotifyEnabled;
+  els.voiceNotifyMessageInput.value = state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
   els.monitorNotifyMessageInput.value = state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
-  updateNotifyMessageEditor();
+  updateMonitorModuleEditors();
 
   // Floating window toggle
   els.floatWindowToggle.checked = state.floatWindowEnabled;
+  els.showTimerToggle.checked = state.showTimerEnabled;
 
   updateTimerDisplay();
   updateLogTimer();

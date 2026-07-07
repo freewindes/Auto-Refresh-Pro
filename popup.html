@@ -75,9 +75,21 @@
       </div>
 
       <div class="control-section">
-        <label class="field-label">刷新上限</label>
-        <div class="count-input-group">
-          <input type="number" id="maxCountInput" min="0" max="99999" value="0" class="count-input" placeholder="0 = 无限制">
+        <div class="section-header">
+          <label class="field-label">
+            刷新上限
+            <span class="help-wrap">
+              <span class="help-icon">?</span>
+              <span class="tooltip">设定自动刷新次数</span>
+            </span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="maxCountToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="count-input-group hidden" id="maxCountBody">
+          <input type="number" id="maxCountInput" min="0" max="99999" value="10" class="count-input">
           <span class="count-hint">0 表示无限制</span>
           <span class="refresh-count">已刷新 <strong id="refreshCount">0</strong> 次</span>
         </div>
@@ -89,11 +101,27 @@
             悬浮窗口
             <span class="help-wrap">
               <span class="help-icon">?</span>
-              <span class="tooltip">在网页右下角显示快捷刷新控制窗</span>
+              <span class="tooltip">启用快捷刷新窗口</span>
             </span>
           </label>
           <label class="toggle-switch">
             <input type="checkbox" id="floatWindowToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="control-section">
+        <div class="section-header">
+          <label class="field-label">
+            显示计时
+            <span class="help-wrap">
+              <span class="help-icon">?</span>
+              <span class="tooltip">启动刷新后在浏览器扩展图标显示倒计时</span>
+            </span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="showTimerToggle">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -105,60 +133,66 @@
         <label class="field-label">刷新模式</label>
         <div class="mode-tabs">
           <button class="mode-tab active" data-mode="full">全页刷新</button>
-          <button class="mode-tab" data-mode="xpath">XPath 点击</button>
+          <button class="mode-tab" data-mode="xpath">模拟点击</button>
         </div>
       </div>
 
       <div class="xpath-section hidden" id="xpathSection">
-        <label class="field-label">点击目标 XPath</label>
+        <!-- <label class="field-label">点击目标 XPath</label> -->
+        <div class="xpath-hint" id="xpathHint">点击“选取”后在页面上点击目标元素</div>
         <div class="xpath-input-group">
           <input type="text" id="xpathInput" placeholder="输入或选取 XPath..." class="xpath-input">
           <button class="btn-pick" id="pickXpathBtn" title="从页面选取元素">选取</button>
         </div>
-        <div class="xpath-hint" id="xpathHint">点击“选取”后在页面上点击目标元素</div>
       </div>
 
       <div class="control-section">
         <div class="section-header">
-          <label class="field-label">监控变化</label>
+          <label class="field-label">监控模式</label>
           <label class="toggle-switch">
             <input type="checkbox" id="monitorToggle">
             <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="monitor-content hidden" id="monitorContent">
-          <label class="field-label sub-label">监控区域 XPath</label>
+          <!-- <label class="field-label sub-label">监控区域 XPath</label> -->
+          <div class="xpath-hint" id="monitorXpathHint">点击“选取”后在页面上选择监控区域</div>
           <div class="xpath-input-group">
             <input type="text" id="monitorXpathInput" placeholder="输入或选取监控区域 XPath..." class="xpath-input">
             <button class="btn-pick" id="pickMonitorXpathBtn" title="从页面选取监控区域">选取</button>
           </div>
-          <div class="xpath-hint" id="monitorXpathHint">点击“选取”后在页面上选择监控区域</div>
+          <div class="alert-section">
+            <div class="section-header">
+              <label class="field-label">警报设置</label>
+            </div>
+            <div class="alert-settings-body" id="alertSettingsBody">
+              <section class="alert-option">
+                <div class="alert-option-header">
+                  <span class="alert-option-title">语音通知</span>
+                  <label class="toggle-switch small">
+                    <input type="checkbox" id="voiceNotifyToggle">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="alert-option-body hidden" id="voiceNotifyBody">
+                  <!-- <label class="field-label sub-label" for="voiceNotifyMessageInput">语音通知内容</label> -->
+                  <textarea id="voiceNotifyMessageInput" class="notify-message-input" maxlength="120" rows="2" placeholder="监控区域内容已发生变化"></textarea>
+                </div>
+              </section>
 
-          <div class="notify-options">
-            <label class="notify-option">
-              <label class="toggle-switch small">
-                <input type="checkbox" id="voiceNotifyToggle">
-                <span class="toggle-slider"></span>
-              </label>
-              <span>语音通知</span>
-            </label>
-            <label class="notify-option">
-              <label class="toggle-switch small">
-                <input type="checkbox" id="popupNotifyToggle">
-                <span class="toggle-slider"></span>
-              </label>
-              <span>弹窗通知</span>
-            </label>
-          </div>
-          <div class="notify-message-field">
-            <label class="field-label sub-label" for="monitorNotifyMessageInput">
-              弹窗通知内容
-              <span class="help-wrap">
-                <span class="help-icon">?</span>
-                <span class="tooltip">开启弹窗通知后，将通过浏览器系统通知显示。</span>
-              </span>
-            </label>
-            <textarea id="monitorNotifyMessageInput" class="notify-message-input" maxlength="120" rows="2" placeholder="监控区域发生变化，请及时查看。" disabled></textarea>
+              <section class="alert-option">
+                <div class="alert-option-header">
+                  <span class="alert-option-title">弹窗通知</span>
+                  <label class="toggle-switch small">
+                    <input type="checkbox" id="popupNotifyToggle">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="alert-option-body hidden" id="popupNotifyBody">
+                  <textarea id="monitorNotifyMessageInput" class="notify-message-input" maxlength="120" rows="2" placeholder="监控区域发生变化，请及时查看。"></textarea>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       </div>

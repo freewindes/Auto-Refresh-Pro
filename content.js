@@ -429,8 +429,16 @@ function showNotification(msg, isError) {
 
   const xpathOrError = document.createElement('div');
   xpathOrError.style.cssText = 'font-size: 11px; color: #94a3b8; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; background: #f8fafc; border-radius: 6px; border: 1px solid #f1f5f9;';
-  xpathOrError.textContent = isError ? (msg.xpath || msg.message || '') : (msg.xpath || '');
-  xpathOrError.title = xpathOrError.textContent;
+  // Show xpath when available. For error cases, do NOT duplicate the message in this monospace block.
+  if (isError) {
+    xpathOrError.textContent = msg.xpath || '';
+    if (!xpathOrError.textContent) xpathOrError.style.display = 'none';
+    else xpathOrError.title = xpathOrError.textContent;
+  } else {
+    xpathOrError.textContent = msg.xpath || '';
+    if (!xpathOrError.textContent) xpathOrError.style.display = 'none';
+    else xpathOrError.title = xpathOrError.textContent;
+  }
 
   content.appendChild(title);
   content.appendChild(msgLine);
@@ -623,7 +631,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (window === window.top) {
         if (msg.voice) {
           try {
-            const utterance = new SpeechSynthesisUtterance('监控区域内容已发生变化');
+            const utterance = new SpeechSynthesisUtterance(msg.voiceMessage || '监控区域内容已发生变化');
             utterance.lang = 'zh-CN';
             utterance.rate = 1.0;
             window.speechSynthesis.speak(utterance);
@@ -698,6 +706,15 @@ let floatWindow = null;
 let floatWindowInterval = null;
 let floatWindowLastInterval = 60;
 
+function getPagePositionKey() {
+  try {
+    // remove hash to match other cache keys
+    return location.href.split('#')[0];
+  } catch (e) {
+    return location.href || 'unknown';
+  }
+}
+
 function setFloatWindowStatus(msg = {}) {
   if (!floatWindow) return;
   const running = !!msg.running;
@@ -707,9 +724,9 @@ function setFloatWindowStatus(msg = {}) {
   const resetBtn = floatWindow.querySelector('[data-action="reset-interval"]');
   if (typeof msg.interval === 'number' && msg.interval > 0) floatWindowLastInterval = msg.interval;
   if (statusEl) {
-    statusEl.textContent = running ? '运行中' : '已停止';
-    statusEl.style.color = running ? '#047857' : '#64748b';
-    statusEl.style.background = running ? 'rgba(16,185,129,0.14)' : 'rgba(100,116,139,0.12)';
+    // statusEl is now a small indicator circle; toggle color
+    statusEl.style.background = running ? '#10b981' : '#ef4444';
+    statusEl.title = running ? '运行中' : '已停止';
   }
   if (countEl) {
     if (running && typeof msg.remaining === 'number' && msg.remaining >= 0) countEl.textContent = msg.remaining + 's';
@@ -718,21 +735,84 @@ function setFloatWindowStatus(msg = {}) {
   }
   if (toggleBtn) {
     toggleBtn.dataset.running = running ? 'true' : 'false';
-    toggleBtn.textContent = running ? '停止' : '启动';
+    // swap icon by replacing innerHTML
+    toggleBtn.innerHTML = running
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
     toggleBtn.style.background = running ? '#fee2e2' : '#dcfce7';
     toggleBtn.style.color = running ? '#b91c1c' : '#047857';
   }
-  if (resetBtn) resetBtn.textContent = '重置 ' + floatWindowLastInterval + 's';
+  if (resetBtn) {
+    resetBtn.title = 'Reset ' + floatWindowLastInterval + 's';
+    resetBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 0-3.2 6.6"/><polyline points="21 12 21 6 15 6"/></svg>';
+  }
 }
 
 function createFloatWindow() {
   if (floatWindow) return;
+  // Build structured floatWindow with status light, countdown and icon buttons
   floatWindow = document.createElement('div');
   floatWindow.id = '__auto_refresh_float_window__';
-  floatWindow.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;width:160px;padding:10px;background:rgba(255,255,255,0.96);border:1px solid rgba(15,23,42,0.12);border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,0.16);backdrop-filter:blur(10px);cursor:move;user-select:none;font-family:"Segoe UI","Noto Sans SC",sans-serif;font-size:12px;color:#0f172a;';
-  floatWindow.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span class="arm-float-status" style="padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;">已停止</span><strong class="arm-float-count" style="font-size:18px;color:#1d4ed8;">--</strong></div>' +
-    '<div class="arm-float-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"><button class="arm-float-btn" data-action="toggle-refresh" data-running="false" style="height:30px;border:none;border-radius:8px;background:#dcfce7;color:#047857;cursor:pointer;font-weight:800;">启动</button><button class="arm-float-btn" data-action="reset-interval" style="height:30px;border:none;border-radius:8px;background:#e0f2fe;color:#0369a1;cursor:pointer;font-weight:800;">重置 60s</button></div>';
+  floatWindow.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;width:200px;padding:8px;background:rgba(255,255,255,0.96);border:1px solid rgba(15,23,42,0.08);border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.12);backdrop-filter:blur(6px);cursor:move;user-select:none;font-family:"Segoe UI","Noto Sans SC",sans-serif;font-size:11px;color:#0f172a;display:flex;align-items:center;gap:8px;';
+
+  // Status indicator
+  const statusIndicator = document.createElement('div');
+  statusIndicator.className = 'arm-float-status';
+  statusIndicator.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0;box-shadow:0 0 0 4px rgba(0,0,0,0.02)';
+
+  // Countdown
+  const countEl = document.createElement('strong');
+  countEl.className = 'arm-float-count';
+  countEl.style.cssText = 'font-size:14px;color:#1d4ed8;min-width:36px;text-align:center;';
+  countEl.textContent = '--';
+
+  // Start/Stop button
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'arm-float-btn';
+  toggleBtn.dataset.action = 'toggle-refresh';
+  toggleBtn.dataset.running = 'false';
+  toggleBtn.style.cssText = 'height:30px;width:34px;border:none;border-radius:8px;background:#dcfce7;color:#047857;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;';
+  toggleBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+
+  // Reset button (icon only)
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'arm-float-btn';
+  resetBtn.dataset.action = 'reset-interval';
+  resetBtn.style.cssText = 'height:30px;width:34px;border:none;border-radius:8px;background:#e0f2fe;color:#0369a1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;';
+  resetBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 0-3.2 6.6"/><polyline points="21 12 21 6 15 6"/></svg>';
+
+  // Close button (disables float window)
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'arm-float-btn';
+  closeBtn.dataset.action = 'close-float';
+  closeBtn.style.cssText = 'height:30px;width:34px;border:none;border-radius:8px;background:#fee2e2;color:#b91c1c;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;';
+  closeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  // Append in order: status - countdown - start - reset - close
+  floatWindow.appendChild(statusIndicator);
+  floatWindow.appendChild(countEl);
+  floatWindow.appendChild(toggleBtn);
+  floatWindow.appendChild(resetBtn);
+  floatWindow.appendChild(closeBtn);
+
   document.body.appendChild(floatWindow);
+
+  // Apply persisted position (if any)
+  try {
+    const key = getPagePositionKey();
+    chrome.storage.local.get(['floatWindowPosition']).then(res => {
+      const map = res.floatWindowPosition || {};
+      const pos = map[key];
+      if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
+        floatWindow.style.left = pos.left + 'px';
+        floatWindow.style.top = pos.top + 'px';
+        floatWindow.style.right = 'auto';
+        floatWindow.style.bottom = 'auto';
+      }
+    }).catch(() => {});
+  } catch (e) { /* ignore */ }
+
+  // Dragging
   let isDragging = false;
   let startX, startY, initialLeft, initialTop;
   floatWindow.addEventListener('mousedown', (e) => {
@@ -750,12 +830,28 @@ function createFloatWindow() {
     floatWindow.style.bottom = 'auto';
   });
   document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
     isDragging = false;
     if (!floatWindow) return;
     floatWindow.style.cursor = 'move';
     floatWindow.style.boxShadow = '0 8px 24px rgba(15,23,42,0.16)';
+    // Persist position so page reloads don't reset it
+    try {
+      const left = parseInt(floatWindow.style.left, 10);
+      const top = parseInt(floatWindow.style.top, 10);
+      if (!isNaN(left) && !isNaN(top)) {
+        const key = getPagePositionKey();
+        chrome.storage.local.get(['floatWindowPosition']).then(res => {
+          const map = res.floatWindowPosition || {};
+          map[key] = { left, top };
+          chrome.storage.local.set({ floatWindowPosition: map }).catch(() => {});
+        }).catch(() => {});
+      }
+    } catch (e) { /* ignore */ }
   });
-  floatWindow.querySelectorAll('.arm-float-btn').forEach(btn => {
+
+  // Button handlers
+  [toggleBtn, resetBtn, closeBtn].forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const action = btn.dataset.action;
@@ -764,6 +860,48 @@ function createFloatWindow() {
         safeSendMessage({ type: running ? 'FLOAT_STOP_REFRESH' : 'FLOAT_START_REFRESH' });
       } else if (action === 'reset-interval') {
         safeSendMessage({ type: 'UPDATE_INTERVAL', interval: floatWindowLastInterval });
+      } else if (action === 'close-float') {
+        // Disable float window and remove DOM
+        safeSendMessage({ type: 'UPDATE_FLOAT_WINDOW', floatWindowEnabled: false });
+        // Clear persisted position for this page and persist floatWindow disabled in site settings
+        try {
+          const key = getPagePositionKey();
+          // Clear position
+          chrome.storage.local.get(['floatWindowPosition']).then(res => {
+            const map = res.floatWindowPosition || {};
+            if (map[key]) {
+              delete map[key];
+              chrome.storage.local.set({ floatWindowPosition: map }).catch(() => {});
+            }
+          }).catch(() => {});
+
+          // Update siteSettingsCache and floatWindowCache to mark this page's floatWindow disabled
+          chrome.storage.local.get(['siteSettingsCache', 'floatWindowCache']).then(res => {
+            const siteSettingsCache = res.siteSettingsCache || {};
+            const floatWindowCache = res.floatWindowCache || {};
+            try {
+              // Use full href without hash to match popup/getUrlCacheKey behavior
+              const url = new URL(location.href);
+              url.hash = '';
+              const pageKey = url.href;
+              siteSettingsCache[pageKey] = {
+                ...(siteSettingsCache[pageKey] || {}),
+                floatWindowEnabled: false,
+              };
+              floatWindowCache[pageKey] = false;
+              chrome.storage.local.set({ siteSettingsCache, floatWindowCache }).catch(() => {});
+            } catch (e) {
+              // fallback: store under full href
+              siteSettingsCache[key] = {
+                ...(siteSettingsCache[key] || {}),
+                floatWindowEnabled: false,
+              };
+              floatWindowCache[key] = false;
+              chrome.storage.local.set({ siteSettingsCache, floatWindowCache }).catch(() => {});
+            }
+          }).catch(() => {});
+        } catch (e) { /* ignore */ }
+        removeFloatWindow();
       }
     });
   });

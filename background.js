@@ -6,6 +6,8 @@
 // State per tab
 const tabStates = new Map();
 const floatWindowPrefs = new Map();
+const badgeTimers = new Map();
+const DEFAULT_VOICE_NOTIFY_MESSAGE = '监控区域内容已发生变化';
 const DEFAULT_MONITOR_NOTIFY_MESSAGE = '监控区域发生变化，请及时查看。';
 
 function getUrlCacheKey(url) {
@@ -16,6 +18,10 @@ function getUrlCacheKey(url) {
   } catch (e) {
     return url || '';
   }
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
 }
 
 // ===== Message Handler =====
@@ -55,14 +61,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           mode: ts.mode,
           xpath: ts.xpath,
           targetFrame: ts.targetFrame,
+          maxCountEnabled: ts.maxCountEnabled,
           maxCount: ts.maxCount,
           waitingForLoad: ts.waitingForLoad,
           monitorEnabled: ts.monitorEnabled,
           monitorXpath: ts.monitorXpath,
           voiceNotifyEnabled: ts.voiceNotifyEnabled,
+          voiceNotifyMessage: ts.voiceNotifyMessage,
           popupNotifyEnabled: ts.popupNotifyEnabled,
           monitorNotifyMessage: ts.monitorNotifyMessage,
           floatWindowEnabled: ts.floatWindowEnabled,
+          showTimerEnabled: ts.showTimerEnabled,
         });
       } else {
         sendResponse({ running: false });
@@ -86,6 +95,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
+        ts.maxCountEnabled = msg.maxCountEnabled || false;
         ts.maxCount = msg.maxCount || 0;
       }
       sendResponse({ ok: true });
@@ -98,6 +108,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ts = tabStates.get(activeTabId);
         ts.monitorEnabled = msg.monitorEnabled || false;
         ts.monitorXpath = msg.monitorXpath || '';
+        if (msg.voiceNotifyMessage !== undefined) ts.voiceNotifyMessage = msg.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
         if (msg.monitorNotifyMessage !== undefined) {
           ts.monitorNotifyMessage = msg.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
         }
@@ -151,11 +162,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'UPDATE_SHOW_TIMER': {
+      const activeTabId = getTargetTabId(msg, sender);
+      if (activeTabId && tabStates.has(activeTabId)) {
+        const ts = tabStates.get(activeTabId);
+        ts.showTimerEnabled = !!msg.showTimerEnabled;
+        startBadgeTimer(activeTabId);
+      } else if (activeTabId) {
+        clearBadgeTimer(activeTabId);
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     case 'UPDATE_NOTIFY': {
       const activeTabId = getTargetTabId(msg, sender);
       if (activeTabId && tabStates.has(activeTabId)) {
         const ts = tabStates.get(activeTabId);
         ts.voiceNotifyEnabled = msg.voiceNotifyEnabled || false;
+        ts.voiceNotifyMessage = msg.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
         ts.popupNotifyEnabled = msg.popupNotifyEnabled || false;
         ts.monitorNotifyMessage = msg.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
       }
@@ -266,6 +291,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'CONTENT_READY': {
+      // Content script reloaded (page navigation/load). Re-sync float window state.
+      const activeTabId = getTargetTabId(msg, sender);
+      if (activeTabId) {
+        const ts = tabStates.get(activeTabId);
+        const enabled = ts ? !!ts.floatWindowEnabled : !!floatWindowPrefs.get(activeTabId);
+        const interval = ts ? ts.interval : (msg.interval || 60);
+        const remaining = ts ? Math.ceil((ts.nextTick - Date.now()) / 1000) : null;
+        chrome.tabs.sendMessage(activeTabId, {
+          type: 'UPDATE_FLOAT_WINDOW',
+          floatWindowEnabled: enabled,
+          interval,
+          remaining,
+          running: !!ts,
+        }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     // Popup asks to cancel picking
     case 'STOP_PICKER': {
       const tabIdToUse = getTargetTabId(msg, sender);
@@ -297,6 +342,7 @@ function startTimer(tabId, config) {
     xpath: config.xpath || '',
     targetFrame: config.targetFrame || 'top',
     refreshCount: 0,
+    maxCountEnabled: config.maxCountEnabled || false,
     maxCount: config.maxCount || 0, // 0 = unlimited
     nextTick: Date.now() + config.interval * 1000,
     timerId: null,
@@ -305,14 +351,17 @@ function startTimer(tabId, config) {
     monitorXpath: config.monitorXpath || '',
     monitorLastValue: '',
     voiceNotifyEnabled: config.voiceNotifyEnabled || false,
+    voiceNotifyMessage: config.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
     popupNotifyEnabled: config.popupNotifyEnabled || false,
     monitorNotifyMessage: config.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
     floatWindowEnabled: config.floatWindowEnabled || floatWindowPrefs.get(tabId) || false,
+    showTimerEnabled: config.showTimerEnabled || false,
   };
 
   floatWindowPrefs.set(tabId, ts.floatWindowEnabled);
   tabStates.set(tabId, ts);
   scheduleNextTick(tabId);
+  startBadgeTimer(tabId);
 
   // Create float window if enabled
   if (ts.floatWindowEnabled) {
@@ -351,6 +400,7 @@ function stopTimer(tabId, notify = true, keepFloatWindow = true) {
     }
     tabStates.delete(tabId);
   }
+  clearBadgeTimer(tabId);
   chrome.alarms.clear(`refresh-tick-${tabId}`).catch(() => {});
   syncRunningStorage();
   if (notify) notifyActiveSitesChanged();
@@ -378,24 +428,30 @@ function restartInterval(tabId) {
   if (!ts) return;
   ts.nextTick = Date.now() + ts.interval * 1000;
   scheduleNextTick(tabId);
+  updateBadgeForTab(tabId);
 }
 
 async function startTimerFromStoredConfig(tabId) {
   const tab = await chrome.tabs.get(tabId);
   const storage = await chrome.storage.local.get([
+    'siteSettingsCache',
     'interval',
     'mode',
     'xpathCache',
     'targetFrame',
+    'maxCountEnabled',
     'maxCount',
+    'maxCountCache',
     'monitorEnabled',
     'monitorXpath',
     'monitorXpathCache',
-    'monitorNotifyMessageCache',
-    'floatWindowCache',
     'voiceNotifyEnabled',
+    'voiceNotifyMessageCache',
     'popupNotifyEnabled',
+    'monitorNotifyMessageCache',
     'floatWindowEnabled',
+    'floatWindowCache',
+    'showTimerEnabled',
   ]);
 
   let origin = '';
@@ -408,40 +464,120 @@ async function startTimerFromStoredConfig(tabId) {
   } catch (e) { /* ignore */ }
 
   const xpathCache = storage.xpathCache || {};
+  const maxCountCache = storage.maxCountCache || {};
   const monitorXpathCache = storage.monitorXpathCache || {};
+  const voiceNotifyMessageCache = storage.voiceNotifyMessageCache || {};
   const monitorNotifyMessageCache = storage.monitorNotifyMessageCache || {};
   const floatWindowCache = storage.floatWindowCache || {};
-  const cachedXpath = origin ? xpathCache[origin] : '';
-  const mode = storage.mode || 'full';
+  const siteSettingsCache = storage.siteSettingsCache || {};
+  const siteSettings = pageKey ? (siteSettingsCache[pageKey] || {}) : {};
+  const cachedXpath = pageKey ? (xpathCache[pageKey] || (origin ? xpathCache[origin] : '')) : '';
+  const cachedMaxCount = pageKey
+    ? (maxCountCache[pageKey] !== undefined ? maxCountCache[pageKey] : (origin ? maxCountCache[origin] : undefined))
+    : undefined;
+  const mode = hasOwn(siteSettings, 'mode') ? (siteSettings.mode || 'full') : (storage.mode || 'full');
   const xpath = cachedXpath && cachedXpath !== '__full__' ? cachedXpath : '';
-  const monitorXpath = pageKey ? (monitorXpathCache[pageKey] || '') : (storage.monitorXpath || '');
-  const monitorNotifyMessage = pageKey
-    ? (monitorNotifyMessageCache[pageKey] || DEFAULT_MONITOR_NOTIFY_MESSAGE)
-    : DEFAULT_MONITOR_NOTIFY_MESSAGE;
-  const pageFloatWindowEnabled = pageKey
-    ? !!floatWindowCache[pageKey]
-    : !!storage.floatWindowEnabled;
+  const pageXpath = hasOwn(siteSettings, 'xpath') ? (siteSettings.xpath || '') : xpath;
+  const targetFrame = hasOwn(siteSettings, 'targetFrame') ? (siteSettings.targetFrame || 'top') : (storage.targetFrame || 'top');
+  const monitorEnabled = hasOwn(siteSettings, 'monitorEnabled') ? !!siteSettings.monitorEnabled : !!storage.monitorEnabled;
+  const monitorXpath = hasOwn(siteSettings, 'monitorXpath')
+    ? (siteSettings.monitorXpath || '')
+    : (pageKey ? (monitorXpathCache[pageKey] || '') : (storage.monitorXpath || ''));
+  const monitorNotifyMessage = hasOwn(siteSettings, 'monitorNotifyMessage')
+    ? (siteSettings.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE)
+    : (pageKey ? (monitorNotifyMessageCache[pageKey] || DEFAULT_MONITOR_NOTIFY_MESSAGE) : DEFAULT_MONITOR_NOTIFY_MESSAGE);
+  const voiceNotifyMessage = hasOwn(siteSettings, 'voiceNotifyMessage')
+    ? (siteSettings.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE)
+    : (pageKey ? (voiceNotifyMessageCache[pageKey] || DEFAULT_VOICE_NOTIFY_MESSAGE) : DEFAULT_VOICE_NOTIFY_MESSAGE);
+  const pageFloatWindowEnabled = hasOwn(siteSettings, 'floatWindowEnabled')
+    ? !!siteSettings.floatWindowEnabled
+    : (pageKey ? !!floatWindowCache[pageKey] : !!storage.floatWindowEnabled);
+  const maxCountEnabled = hasOwn(siteSettings, 'maxCountEnabled')
+    ? !!siteSettings.maxCountEnabled
+    : (cachedMaxCount !== undefined
+    ? !!cachedMaxCount.enabled
+    : (storage.maxCountEnabled !== undefined ? !!storage.maxCountEnabled : (storage.maxCount || 0) > 0));
+  const maxCount = hasOwn(siteSettings, 'maxCount')
+    ? (Number(siteSettings.maxCount) || 0)
+    : (cachedMaxCount !== undefined
+    ? Number(cachedMaxCount.count) || 0
+    : (storage.maxCount || 0));
+  const interval = hasOwn(siteSettings, 'interval') ? (Number(siteSettings.interval) || 60) : (storage.interval || 60);
+  const voiceNotifyEnabled = hasOwn(siteSettings, 'voiceNotifyEnabled')
+    ? !!siteSettings.voiceNotifyEnabled
+    : !!storage.voiceNotifyEnabled;
+  const popupNotifyEnabled = hasOwn(siteSettings, 'popupNotifyEnabled')
+    ? !!siteSettings.popupNotifyEnabled
+    : !!storage.popupNotifyEnabled;
+  const showTimerEnabled = hasOwn(siteSettings, 'showTimerEnabled')
+    ? !!siteSettings.showTimerEnabled
+    : !!storage.showTimerEnabled;
 
-  if (mode === 'xpath' && !xpath) {
+  if (mode === 'xpath' && !pageXpath) {
     throw new Error('XPath is required before starting XPath refresh');
   }
-  if (storage.monitorEnabled && !monitorXpath) {
+  if (monitorEnabled && !monitorXpath) {
     throw new Error('Monitor XPath is required before starting monitor refresh');
   }
 
   startTimer(tabId, {
-    interval: storage.interval || 60,
+    interval,
     mode,
-    xpath,
-    targetFrame: storage.targetFrame || 'top',
-    maxCount: storage.maxCount || 0,
-    monitorEnabled: storage.monitorEnabled || false,
+    xpath: pageXpath,
+    targetFrame,
+    maxCountEnabled,
+    maxCount,
+    monitorEnabled,
     monitorXpath,
-    voiceNotifyEnabled: storage.voiceNotifyEnabled || false,
-    popupNotifyEnabled: storage.popupNotifyEnabled || false,
+    // alertSettingsEnabled legacy flag removed; rely on individual notify flags
+    voiceNotifyEnabled,
+    voiceNotifyMessage,
+    popupNotifyEnabled,
     monitorNotifyMessage,
     floatWindowEnabled: pageFloatWindowEnabled || floatWindowPrefs.get(tabId) || true,
+    showTimerEnabled,
   });
+}
+
+function formatBadgeRemaining(remaining) {
+  if (remaining < 0) return '...';
+  if (remaining <= 999) return String(remaining);
+  const minutes = Math.ceil(remaining / 60);
+  return minutes > 99 ? '99m' : String(minutes) + 'm';
+}
+
+function updateBadgeForTab(tabId) {
+  const ts = tabStates.get(tabId);
+  if (!ts || !ts.showTimerEnabled) {
+    chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+    return;
+  }
+
+  const remaining = ts.waitingForLoad ? -1 : Math.max(0, Math.ceil((ts.nextTick - Date.now()) / 1000));
+  chrome.action.setBadgeBackgroundColor({ tabId, color: '#2563eb' }).catch(() => {});
+  chrome.action.setBadgeText({ tabId, text: formatBadgeRemaining(remaining) }).catch(() => {});
+}
+
+function clearBadgeTimer(tabId) {
+  const badgeTimerId = badgeTimers.get(tabId);
+  if (badgeTimerId) clearInterval(badgeTimerId);
+  badgeTimers.delete(tabId);
+  chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+}
+
+function startBadgeTimer(tabId) {
+  const existing = badgeTimers.get(tabId);
+  if (existing) clearInterval(existing);
+  badgeTimers.delete(tabId);
+
+  const ts = tabStates.get(tabId);
+  if (!ts || !ts.showTimerEnabled) {
+    chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+    return;
+  }
+
+  updateBadgeForTab(tabId);
+  badgeTimers.set(tabId, setInterval(() => updateBadgeForTab(tabId), 1000));
 }
 
 async function getXPathText(tabId, xpath) {
@@ -495,24 +631,12 @@ async function triggerMonitorNotify(tabId, ts) {
       const resp = await chrome.tabs.sendMessage(tabId, {
         type: 'MONITOR_NOTIFY',
         voice: true,
+        voiceMessage: ts.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
         popup: false,
       });
       if (resp && resp.ok) notified = true;
     } catch (e) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tabId, allFrames: false },
-          files: ['content.js'],
-        });
-        await chrome.tabs.sendMessage(tabId, {
-          type: 'MONITOR_NOTIFY',
-          voice: true,
-          popup: false,
-        });
-        notified = true;
-      } catch (e2) {
-        // System popup notification has already been attempted above.
-      }
+      // System popup notification has already been attempted above.
     }
   }
 
@@ -530,7 +654,7 @@ async function createMonitorSystemNotification(tabId, ts) {
     let title = '';
     try {
       const tab = await chrome.tabs.get(tabId);
-      title = tab?.url || '';
+      title = tab?.title || '';
     } catch (e) { /* ignore */ }
 
     const notificationId = `monitor-${tabId}-${Date.now()}`;
@@ -543,7 +667,7 @@ async function createMonitorSystemNotification(tabId, ts) {
     });
     setTimeout(() => {
       chrome.notifications.clear(notificationId).catch(() => {});
-    }, 3000);
+    }, 5000);
     return true;
   } catch (e) {
     return false;
@@ -559,7 +683,7 @@ async function executeTick(tabId) {
   ts.ticking = true;
 
   // Check max count limit
-  if (ts.maxCount > 0 && ts.refreshCount >= ts.maxCount) {
+  if (ts.maxCountEnabled && ts.maxCount > 0 && ts.refreshCount >= ts.maxCount) {
     stopTimer(tabId);
     chrome.runtime.sendMessage({
       type: 'REFRESH_DONE',
@@ -580,6 +704,7 @@ async function executeTick(tabId) {
       }
 
       ts.waitingForLoad = true;
+      updateBadgeForTab(tabId);
       await chrome.tabs.reload(tabId);
       ts.refreshCount++;
 
@@ -624,6 +749,7 @@ async function executeTick(tabId) {
       ts.refreshCount++;
       ts.nextTick = Date.now() + ts.interval * 1000;
       scheduleNextTick(tabId);
+      updateBadgeForTab(tabId);
 
       // For xpath mode, check monitor change after click with retry
       if (ts.monitorEnabled && ts.monitorXpath) {
@@ -650,6 +776,7 @@ async function executeTick(tabId) {
 
     ts.nextTick = Date.now() + ts.interval * 1000;
     scheduleNextTick(tabId);
+    updateBadgeForTab(tabId);
   }
   ts.ticking = false;
 }
@@ -668,7 +795,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       // Now start the countdown for the next refresh
       ts.nextTick = Date.now() + ts.interval * 1000;
       scheduleNextTick(tabId);
-
       // Check monitor change after page loaded with retry (up to 10s)
       if (ts.monitorEnabled && ts.monitorXpath) {
         setTimeout(async () => {
@@ -678,6 +804,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
           }
         }, 500);
       }
+
+      updateBadgeForTab(tabId);
 
       // Notify popup that page load is complete and countdown restarted
       chrome.runtime.sendMessage({

@@ -295,7 +295,7 @@ body {
   border: 1px solid var(--border-color);
 }
 
-.field-label {
+/* .field-label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -305,7 +305,7 @@ body {
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
+} */
 
 /* ===== Interval Input ===== */
 .interval-input-group {
@@ -362,7 +362,9 @@ body {
   -webkit-appearance: none;
   margin: 0;
 }
+
 .interval-input[type=number] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
@@ -562,6 +564,7 @@ body {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 .count-input {
@@ -589,28 +592,44 @@ body {
   -webkit-appearance: none;
   margin: 0;
 }
+
 .count-input[type=number] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
+/* 提示文本 */
 .count-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
 }
 
+/* 刷新计数器 */
 .refresh-count {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 10px;
   font-size: 12px;
   color: var(--text-secondary);
-  margin-left: auto;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  border-radius: 20px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
 }
 
 .refresh-count strong {
   color: var(--accent-cyan);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 1.5em;
+  display: inline-block;
+  text-align: center;
 }
+
 
 /* ===== Log Section ===== */
 .log-section {
@@ -998,33 +1017,50 @@ body {
   display: none;
 }
 
-.sub-label {
-  font-size: 11px;
-  margin-bottom: 6px;
-  color: var(--text-muted);
-}
-
-/* ===== Notify Options ===== */
-.notify-options {
-  display: flex;
-  gap: 16px;
-  margin-top: 10px;
-  padding-top: 10px;
+/* ===== Alert Settings ===== */
+.alert-section {
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-color);
 }
 
-.notify-option {
+.alert-settings-body {
+  margin-top: 10px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.notify-option span {
-  white-space: nowrap;
+.alert-settings-body.hidden {
+  display: none;
+}
+
+.alert-option {
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.alert-option-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alert-option-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.alert-option-body {
+  margin-top: 8px;
+}
+
+.alert-option-body.hidden {
+  display: none;
 }
 
 .notify-message-field {
