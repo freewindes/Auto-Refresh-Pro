@@ -1,21 +1,27 @@
 <div align="center">
-# 🚀 **Auto Refresh Pro**
-
-**智能网页自动刷新扩展**  
-*Chrome Manifest V3 · 高效 · 精准 · 多场景适配*
-
-![Version](https://img.shields.io/badge/版本-1.0.11-%2300d4ff?style=for-the-badge) 
-![Chrome](https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome) 
-![Manifest V3](https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge)
-
-> 定时刷新、XPath 智能点击、实时内容变化监控、悬浮控制窗 —— 让网页保持最新状态。
+  <h1>
+    <img src="https://via.placeholder.com/64/00d4ff/ffffff?text=🔄" width="64" style="vertical-align:middle">
+    <strong style="font-size: 3.2em; background: linear-gradient(90deg, #00d4ff, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+      Auto Refresh Pro
+    </strong>
+  </h1>
+  
+  <p><strong>智能网页自动刷新扩展</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/版本-1.0.11-%2300d4ff?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome" alt="Chrome">
+    <img src="https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge" alt="Manifest V3">
+  </p>
 </div>
+
+> 定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗
 
 ---
 
 ## 🌌 **功能矩阵**
 
 <div align="center">
+  <img src="https://via.placeholder.com/860x420/1a1a2e/00d4ff?text=Auto+Refresh+Pro+主界面" alt="Auto Refresh Pro Interface" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);">
 
 | 特性 | 描述 |
 |------|------|
