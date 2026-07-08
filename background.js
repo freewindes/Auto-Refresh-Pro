@@ -7,6 +7,7 @@
 const tabStates = new Map();
 const floatWindowPrefs = new Map();
 const badgeTimers = new Map();
+const IFRAME_XPATH_SEPARATOR = ' >> ';
 const DEFAULT_VOICE_NOTIFY_MESSAGE = '监控区域内容已发生变化';
 const DEFAULT_MONITOR_NOTIFY_MESSAGE = '监控区域发生变化，请及时查看。';
 
@@ -22,6 +23,22 @@ function getUrlCacheKey(url) {
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function splitFrameXPath(xpath) {
+  const value = String(xpath || '');
+  const index = value.indexOf(IFRAME_XPATH_SEPARATOR);
+  if (index === -1) {
+    return { frameXPath: '', innerXPath: value };
+  }
+  return {
+    frameXPath: value.slice(0, index).trim(),
+    innerXPath: value.slice(index + IFRAME_XPATH_SEPARATOR.length).trim(),
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ===== Message Handler =====
@@ -581,20 +598,58 @@ function startBadgeTimer(tabId) {
 }
 
 async function getXPathText(tabId, xpath) {
+  const parsed = splitFrameXPath(xpath);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tabId, allFrames: true },
-      func: (xpathStr) => {
+      func: (frameXPath, innerXPath, separator) => {
         try {
-          const result = document.evaluate(xpathStr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          if (frameXPath) {
+            if (window === window.top) {
+              const frameResult = document.evaluate(frameXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+              const iframe = frameResult.singleNodeValue;
+              const index = Array.from(document.querySelectorAll('iframe')).indexOf(iframe);
+              return index >= 0 ? `${separator}${index}` : '';
+            }
+            return '';
+          }
+
+          const result = document.evaluate(innerXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
           const element = result.singleNodeValue;
           return element ? (element.textContent || '').trim() : '';
         } catch (e) {
           return '';
         }
       },
-      args: [xpath],
+      args: [parsed.frameXPath, parsed.innerXPath, IFRAME_XPATH_SEPARATOR],
     });
+    if (parsed.frameXPath) {
+      const marker = results.find((r) => typeof r.result === 'string' && r.result.startsWith(IFRAME_XPATH_SEPARATOR))?.result;
+      const targetFrame = marker ? marker.slice(IFRAME_XPATH_SEPARATOR.length) : '';
+      if (!targetFrame) return '';
+      await syncFrameIndexes(tabId);
+      await sleep(60);
+
+      const frameResults = await chrome.scripting.executeScript({
+        target: { tabId: tabId, allFrames: true },
+        func: (innerXPath, frameIndex) => {
+          try {
+            if (window === window.top) return '';
+            if (String(window.__autoRefreshFrameIndex || '') !== String(frameIndex)) return '';
+            const result = document.evaluate(innerXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            const element = result.singleNodeValue;
+            return element ? (element.textContent || '').trim() : '';
+          } catch (e) {
+            return '';
+          }
+        },
+        args: [parsed.innerXPath, targetFrame],
+      });
+      for (const r of frameResults) {
+        if (r.result) return r.result;
+      }
+      return '';
+    }
     for (const r of results) {
       if (r.result) return r.result;
     }
@@ -602,6 +657,50 @@ async function getXPathText(tabId, xpath) {
   } catch (e) {
     return '';
   }
+}
+
+async function resolveFrameTarget(tabId, xpath, fallbackFrame) {
+  const parsed = splitFrameXPath(xpath);
+  if (!parsed.frameXPath) return fallbackFrame || 'top';
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: (frameXPath) => {
+        try {
+          const result = document.evaluate(frameXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          const iframe = result.singleNodeValue;
+          const index = Array.from(document.querySelectorAll('iframe')).indexOf(iframe);
+          return index >= 0 ? String(index) : '';
+        } catch (e) {
+          return '';
+        }
+      },
+      args: [parsed.frameXPath],
+    });
+    return results?.[0]?.result || fallbackFrame || 'top';
+  } catch (e) {
+    return fallbackFrame || 'top';
+  }
+}
+
+async function syncFrameIndexes(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: () => {
+        document.querySelectorAll('iframe').forEach((iframe, index) => {
+          try {
+            iframe.contentWindow?.postMessage({
+              source: 'AUTO_REFRESH_PRO',
+              type: 'SET_FRAME_INDEX',
+              frameIndex: String(index),
+            }, '*');
+          } catch (e) { /* ignore */ }
+        });
+      },
+    });
+  } catch (e) { /* ignore */ }
 }
 
 async function waitForXPathText(tabId, xpath, timeoutMs = 10000) {
@@ -724,11 +823,14 @@ async function executeTick(tabId) {
       }
 
       // XPath click mode - send message to content script in target frame.
+      const resolvedTargetFrame = await resolveFrameTarget(tabId, ts.xpath, ts.targetFrame);
+      await syncFrameIndexes(tabId);
+      await sleep(60);
       try {
         await chrome.tabs.sendMessage(tabId, {
           type: 'EXECUTE_XPATH_CLICK',
           xpath: ts.xpath,
-          targetFrame: ts.targetFrame,
+          targetFrame: resolvedTargetFrame,
         });
       } catch (e) {
         try {
@@ -739,7 +841,7 @@ async function executeTick(tabId) {
           await chrome.tabs.sendMessage(tabId, {
             type: 'EXECUTE_XPATH_CLICK',
             xpath: ts.xpath,
-            targetFrame: ts.targetFrame,
+            targetFrame: resolvedTargetFrame,
           });
         } catch (e2) {
           throw new Error(`XPath 点击执行失败: ${e2.message}`);

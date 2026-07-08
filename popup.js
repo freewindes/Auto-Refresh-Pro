@@ -21,11 +21,13 @@ const els = {
   xpathSection: document.getElementById('xpathSection'),
   xpathInput: document.getElementById('xpathInput'),
   pickXpathBtn: document.getElementById('pickXpathBtn'),
+  locateXpathBtn: document.getElementById('locateXpathBtn'),
   xpathHint: document.getElementById('xpathHint'),
   monitorToggle: document.getElementById('monitorToggle'),
   monitorContent: document.getElementById('monitorContent'),
   monitorXpathInput: document.getElementById('monitorXpathInput'),
   pickMonitorXpathBtn: document.getElementById('pickMonitorXpathBtn'),
+  locateMonitorXpathBtn: document.getElementById('locateMonitorXpathBtn'),
   monitorXpathHint: document.getElementById('monitorXpathHint'),
   voiceNotifyToggle: document.getElementById('voiceNotifyToggle'),
   voiceNotifyBody: document.getElementById('voiceNotifyBody'),
@@ -54,6 +56,7 @@ let state = {
   mode: 'full',
   xpath: '',
   targetFrame: 'top',
+  monitorTargetFrame: 'top',
   refreshCount: 0,
   remaining: 60,
   picking: false,
@@ -162,6 +165,7 @@ async function loadState() {
     if (siteSettings.targetFrame !== undefined) state.targetFrame = siteSettings.targetFrame || 'top';
     if (siteSettings.monitorEnabled !== undefined) state.monitorEnabled = !!siteSettings.monitorEnabled;
     if (siteSettings.monitorXpath !== undefined) state.monitorXpath = siteSettings.monitorXpath || '';
+    if (siteSettings.monitorTargetFrame !== undefined) state.monitorTargetFrame = siteSettings.monitorTargetFrame || 'top';
     if (siteSettings.voiceNotifyEnabled !== undefined) state.voiceNotifyEnabled = !!siteSettings.voiceNotifyEnabled;
     if (siteSettings.voiceNotifyMessage !== undefined) {
       state.voiceNotifyMessage = siteSettings.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
@@ -249,11 +253,13 @@ async function loadState() {
             ...(siteSettingsCache[pickPageKey] || {}),
             monitorEnabled: true,
             monitorXpath: pick.xpath,
+            monitorTargetFrame: pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top',
           };
           monitorXpathCache[pickPageKey] = pick.xpath;
           await chrome.storage.local.set({ siteSettingsCache, monitorXpathCache });
         }
         state.monitorXpath = pick.xpath;
+        state.monitorTargetFrame = pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top';
         state.monitorEnabled = true;
         addLog(`已选取监控区域 XPath: ${pick.xpath}`, 'info');
       }
@@ -273,11 +279,13 @@ async function loadState() {
                 ...(siteSettingsCache[pickPageKey] || {}),
                 monitorEnabled: true,
                 monitorXpath: pick.xpath,
+                monitorTargetFrame: pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top',
               };
               monitorXpathCache[pickPageKey] = pick.xpath;
               await chrome.storage.local.set({ siteSettingsCache, monitorXpathCache });
             }
             state.monitorXpath = pick.xpath;
+            state.monitorTargetFrame = pick.frameIndex && pick.frameIndex !== 'top' ? pick.frameIndex : 'top';
             state.monitorEnabled = true;
             addLog(`已选取监控区域 XPath: ${pick.xpath}`, 'info');
           }
@@ -376,6 +384,7 @@ async function saveState() {
         maxCount: state.maxCount,
         monitorEnabled: state.monitorEnabled,
         monitorXpath: state.monitorXpath,
+        monitorTargetFrame: state.monitorTargetFrame,
         voiceNotifyEnabled: state.voiceNotifyEnabled,
         voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
         popupNotifyEnabled: state.popupNotifyEnabled,
@@ -572,12 +581,14 @@ function bindEvents() {
   });
 
   els.pickXpathBtn.addEventListener('click', () => startXPathPicker('click'));
+  els.locateXpathBtn.addEventListener('click', () => locateCurrentXPath('click'));
   els.xpathInput.addEventListener('change', () => {
     state.xpath = els.xpathInput.value.trim();
     saveState();
   });
 
   els.pickMonitorXpathBtn.addEventListener('click', () => startXPathPicker('monitor'));
+  els.locateMonitorXpathBtn.addEventListener('click', () => locateCurrentXPath('monitor'));
   els.monitorXpathInput.addEventListener('change', () => {
     state.monitorXpath = els.monitorXpathInput.value.trim();
     saveState();
@@ -802,6 +813,144 @@ async function showPageErrorNotification(title, message, xpath = '') {
   } catch (e) { /* ignore */ }
 }
 
+async function locateCurrentXPath(forMode) {
+  const isClickMode = forMode === 'click';
+  const xpath = isClickMode ? state.xpath : state.monitorXpath;
+
+  if (!xpath) {
+    const title = isClickMode ? '点击 XPath 为空' : '监控 XPath 为空';
+    const message = isClickMode ? '请先输入或选取点击目标 XPath' : '请先输入或选取监控区域 XPath';
+    addLog(message, 'error');
+    await showPageErrorNotification(title, message, xpath);
+    return;
+  }
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: (xpathValue) => {
+        const separator = ' >> ';
+        const overlayId = '__auto_refresh_locator_overlay__';
+        const blinkCount = 1;
+        const durationPerBlink = 1.5;
+
+        try {
+          const splitIndex = String(xpathValue || '').indexOf(separator);
+          const frameXPath = splitIndex >= 0 ? xpathValue.slice(0, splitIndex).trim() : '';
+          const innerXPath = splitIndex >= 0 ? xpathValue.slice(splitIndex + separator.length).trim() : xpathValue;
+
+          if (frameXPath) {
+            if (window === window.top) return { found: false };
+          }
+
+          const result = document.evaluate(innerXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          const element = result.singleNodeValue;
+          if (!element || element.nodeType !== Node.ELEMENT_NODE) {
+            return { found: false };
+          }
+
+          if (window.__autoRefreshLocatorCleanup) {
+            window.__autoRefreshLocatorCleanup();
+          }
+
+          // 1. 动态向页面注入呼吸灯的动画样式（只需注入一次）
+          const styleId = '__auto_refresh_locator_style__';
+          if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+              @keyframes armBreathe {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.05; }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+
+          // 2. 创建或重置高亮层
+          let overlay = document.getElementById(overlayId);
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = overlayId;
+            document.documentElement.appendChild(overlay);
+          }
+
+          // 3. 动态计算并应用动画属性：执行 blinkCount 次，每次持续 durationPerBlink 秒
+          overlay.style.cssText = [
+            'position:fixed',
+            'pointer-events:none',
+            'z-index:2147483646',
+            'border:none !important',
+            'background:rgba(96, 73, 200, 0.22)',
+            'box-shadow: inset 0 0 8px 4px rgb(96, 73, 200) !important',
+            'border-radius:3px',
+            'display:none',
+            `animation: armBreathe ${durationPerBlink}s ease-in-out ${blinkCount}` // 👈 控制核心！
+          ].join(';');
+
+          const updateOverlay = () => {
+            const rect = element.getBoundingClientRect();
+            overlay.style.display = 'block';
+            overlay.style.left = `${rect.left}px`;
+            overlay.style.top = `${rect.top}px`;
+            overlay.style.width = `${Math.max(rect.width, 1)}px`;
+            overlay.style.height = `${Math.max(rect.height, 1)}px`;
+          };
+
+          element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+          updateOverlay();
+
+          // 只要动画还在播，就持续跟踪位置防止错位
+          const totalAnimationTime = blinkCount * durationPerBlink * 1000;
+          let ticks = 0;
+          const intervalId = setInterval(() => {
+            updateOverlay();
+            ticks += 1;
+            if (ticks >= (totalAnimationTime / 100)) {
+              clearInterval(intervalId);
+            }
+          }, 100);
+
+          const cleanup = () => {
+            clearInterval(intervalId);
+            if (overlay && overlay.parentElement) {
+              overlay.remove();
+            }
+          };
+          window.__autoRefreshLocatorCleanup = cleanup;
+
+          // 4. 动画播完后，干净利落地自动销毁
+          setTimeout(() => {
+            if (window.__autoRefreshLocatorCleanup === cleanup) {
+              cleanup();
+              window.__autoRefreshLocatorCleanup = null;
+            }
+          }, totalAnimationTime); // 👈 刚好是总闪烁时间
+
+          return { found: true };
+        } catch (e) {
+          return { found: false, error: e.message || String(e) };
+        }
+      },
+      args: [xpath],
+    });
+
+    const found = Array.isArray(results) && results.some((item) => item?.result?.found);
+
+    if (found) {
+      addLog(`已定位 XPath 位置: ${xpath}`, 'info');
+    } else {
+      addLog(`未找到 XPath 匹配元素: ${xpath}`, 'error');
+      await showPageErrorNotification('XPath 定位失败', '当前页面未找到匹配元素，请检查 XPath 是否正确', xpath);
+    }
+  } catch (e) {
+    addLog(`定位 XPath 失败: ${e.message || e}`, 'error');
+  }
+}
+
 async function startRefresh() {
   if (state.mode === 'xpath' && !state.xpath) {
     addLog('请先输入或选取 XPath 表达式', 'error');
@@ -1007,6 +1156,8 @@ chrome.runtime.onMessage.addListener(async (msg) => {
       } else {
         state.monitorXpath = msg.xpath;
         els.monitorXpathInput.value = msg.xpath;
+        const frameIndex = msg.frameIndex;
+        state.monitorTargetFrame = frameIndex && frameIndex !== 'top' ? frameIndex : 'top';
         if (state.running) {
           chrome.runtime.sendMessage({
             type: 'UPDATE_MONITOR',

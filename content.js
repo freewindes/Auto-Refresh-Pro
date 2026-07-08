@@ -9,11 +9,15 @@
 // ===== Frame Index Self-Detection =====
 // Each content script instance determines its own frame index
 // so that picked XPath can be associated with the correct iframe.
+const IFRAME_XPATH_SEPARATOR = ' >> ';
+
 let myFrameIndex = 'top'; // 'top' for top-level, or numeric index for iframe
+window.__autoRefreshFrameIndex = myFrameIndex;
 
 function detectMyFrameIndex() {
   if (window === window.top) {
     myFrameIndex = 'top';
+    window.__autoRefreshFrameIndex = myFrameIndex;
     return;
   }
   // Ask parent frame to identify our index
@@ -23,6 +27,7 @@ function detectMyFrameIndex() {
     for (let i = 0; i < iframes.length; i++) {
       if (iframes[i].contentWindow === window) {
         myFrameIndex = String(i);
+        window.__autoRefreshFrameIndex = myFrameIndex;
         return;
       }
     }
@@ -30,9 +35,47 @@ function detectMyFrameIndex() {
     // Cross-origin: cannot access parent document.
     // Use a messaging approach instead — resolved in XPATH_PICKED handler.
     myFrameIndex = 'unknown';
+    window.__autoRefreshFrameIndex = myFrameIndex;
   }
 }
 detectMyFrameIndex();
+
+function splitFrameXPath(xpath) {
+  const value = String(xpath || '');
+  const index = value.indexOf(IFRAME_XPATH_SEPARATOR);
+  if (index === -1) {
+    return { frameXPath: '', innerXPath: value };
+  }
+  return {
+    frameXPath: value.slice(0, index).trim(),
+    innerXPath: value.slice(index + IFRAME_XPATH_SEPARATOR.length).trim(),
+  };
+}
+
+function joinFrameXPath(frameXPath, innerXPath) {
+  if (!frameXPath) return innerXPath;
+  return `${frameXPath}${IFRAME_XPATH_SEPARATOR}${innerXPath}`;
+}
+
+function syncChildFrameIndexes() {
+  if (window !== window.top) return;
+
+  document.querySelectorAll('iframe').forEach((iframe, index) => {
+    try {
+      iframe.contentWindow?.postMessage({
+        source: 'AUTO_REFRESH_PRO',
+        type: 'SET_FRAME_INDEX',
+        frameIndex: String(index),
+      }, '*');
+    } catch (e) { /* ignore */ }
+  });
+}
+
+if (window === window.top) {
+  syncChildFrameIndexes();
+  setTimeout(syncChildFrameIndexes, 800);
+  setTimeout(syncChildFrameIndexes, 2500);
+}
 
 let extensionContextValid = true;
 
@@ -158,7 +201,8 @@ function findElementByXPath(xpath, context) {
  * so we simply use the local document — no cross-origin access needed.
  */
 function executeXPathClick(xpath) {
-  const element = findElementByXPath(xpath, document);
+  const parsed = splitFrameXPath(xpath);
+  const element = findElementByXPath(parsed.innerXPath, document);
   if (!element) {
     throw new Error(`未找到匹配的元素: ${xpath}`);
   }
@@ -209,7 +253,8 @@ function createHighlightOverlay() {
     position: fixed;
     pointer-events: none;
     z-index: 2147483646;
-    border: 2px solid #818cf8;
+    box-shadow: inset 0 0 0 2px #818cf8 !important;
+    border: none !important;
     background: rgba(129, 140, 248, 0.15);
     border-radius: 3px;
     transition: all 0.1s ease;
@@ -339,6 +384,22 @@ function onPickerClick(e) {
   const textContent = (element.textContent || '').trim().substring(0, 50);
   stopPicker();
 
+  if (window !== window.top) {
+    try {
+      window.parent.postMessage({
+        source: 'AUTO_REFRESH_PRO',
+        type: 'IFRAME_XPATH_PICKED',
+        xpath,
+        tagName,
+        textContent,
+        frameIndex: myFrameIndex,
+      }, '*');
+      return;
+    } catch (e) {
+      // Fall through to direct reporting when parent frame is not reachable.
+    }
+  }
+
   // Send xpath back to popup via background with element info and frame index
   safeSendMessage({
     type: 'XPATH_PICKED',
@@ -348,6 +409,48 @@ function onPickerClick(e) {
     frameIndex: myFrameIndex,
   });
 }
+
+window.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.source !== 'AUTO_REFRESH_PRO') return;
+
+  if (data.type === 'SET_FRAME_INDEX') {
+    myFrameIndex = String(data.frameIndex || 'unknown');
+    window.__autoRefreshFrameIndex = myFrameIndex;
+    return;
+  }
+
+  if (data.type !== 'IFRAME_XPATH_PICKED') return;
+
+  let iframeXPath = '';
+  let frameIndex = data.frameIndex || 'unknown';
+
+  try {
+    const iframes = Array.from(document.querySelectorAll('iframe'));
+    const iframe = iframes.find((item) => item.contentWindow === event.source);
+    if (iframe) {
+      iframeXPath = generateXPath(iframe);
+      frameIndex = String(iframes.indexOf(iframe));
+      try {
+        event.source?.postMessage({
+          source: 'AUTO_REFRESH_PRO',
+          type: 'SET_FRAME_INDEX',
+          frameIndex,
+        }, '*');
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+
+  safeSendMessage({
+    type: 'XPATH_PICKED',
+    xpath: joinFrameXPath(iframeXPath, data.xpath || ''),
+    tagName: data.tagName || '',
+    textContent: data.textContent || '',
+    frameIndex,
+    frameXPath: iframeXPath,
+    innerXPath: data.xpath || '',
+  });
+});
 
 function onPickerKeyDown(e) {
   if (e.key === 'Escape' && pickerActive) {
@@ -646,6 +749,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'START_PICKING': {
+      syncChildFrameIndexes();
       // All frames can start picking — user may click inside an iframe
       const targetFrame = msg.targetFrame;
       // If a specific frame is targeted, only that frame starts picker

@@ -141,7 +141,19 @@
         <!-- <label class="field-label">点击目标 XPath</label> -->
         <div class="xpath-hint" id="xpathHint">点击“选取”后在页面上点击目标元素</div>
         <div class="xpath-input-group">
-          <input type="text" id="xpathInput" placeholder="输入或选取 XPath..." class="xpath-input">
+          <div class="xpath-input-wrap">
+            <input type="text" id="xpathInput" placeholder="输入或选取 XPath..." class="xpath-input">
+            <button class="btn-locate" id="locateXpathBtn" title="定位当前 XPath 位置" aria-label="定位当前 XPath 位置">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="7"></circle>
+                <line x1="12" y1="2" x2="12" y2="5"></line>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
+                <line x1="2" y1="12" x2="5" y2="12"></line>
+                <line x1="19" y1="12" x2="22" y2="12"></line>
+                <circle cx="12" cy="12" r="2"></circle>
+              </svg>
+            </button>
+          </div>
           <button class="btn-pick" id="pickXpathBtn" title="从页面选取元素">选取</button>
         </div>
       </div>
@@ -158,7 +170,19 @@
           <!-- <label class="field-label sub-label">监控区域 XPath</label> -->
           <div class="xpath-hint" id="monitorXpathHint">点击“选取”后在页面上选择监控区域</div>
           <div class="xpath-input-group">
-            <input type="text" id="monitorXpathInput" placeholder="输入或选取监控区域 XPath..." class="xpath-input">
+            <div class="xpath-input-wrap">
+              <input type="text" id="monitorXpathInput" placeholder="输入或选取监控区域 XPath..." class="xpath-input">
+              <button class="btn-locate" id="locateMonitorXpathBtn" title="定位当前监控 XPath 位置" aria-label="定位当前监控 XPath 位置">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="7"></circle>
+                  <line x1="12" y1="2" x2="12" y2="5"></line>
+                  <line x1="12" y1="19" x2="12" y2="22"></line>
+                  <line x1="2" y1="12" x2="5" y2="12"></line>
+                  <line x1="19" y1="12" x2="22" y2="12"></line>
+                  <circle cx="12" cy="12" r="2"></circle>
+                </svg>
+              </button>
+            </div>
             <button class="btn-pick" id="pickMonitorXpathBtn" title="从页面选取监控区域">选取</button>
           </div>
           <div class="alert-section">
