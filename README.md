@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="icons/icon48.png" width="64" style="vertical-align:middle">
+    <img src="icons/icon16.png" width="16" style="vertical-align:middle">
     <strong style="font-size: 3.2em; background: linear-gradient(90deg, #00d4ff, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
       Auto Refresh Pro
     </strong>
