@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="icons/icon16.png" width="16" style="vertical-align:middle">
+    <img src="icons/icon128.png" width="24" style="vertical-align:middle">
     <strong style="font-size: 3.2em; background: linear-gradient(90deg, #00d4ff, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
       Auto Refresh Pro
     </strong>
@@ -18,7 +18,7 @@
 ---
 
 <p align="center">
-  <img src="hoem.png" alt="Auto Refresh Pro Home" width="85%" style="border-radius: 10px; border: 1px solid #e1e4e8;">
+  <img src="hoem.png" alt="Auto Refresh Pro Home" width="50%" style="border-radius: 10px; border: 1px solid #e1e4e8;">
 </p>
 
 ---
