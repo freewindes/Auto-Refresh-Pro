@@ -203,6 +203,7 @@ async function loadState() {
       if (statusResult.maxCount !== undefined) state.maxCount = statusResult.maxCount;
       if (statusResult.monitorEnabled !== undefined) state.monitorEnabled = statusResult.monitorEnabled;
       if (statusResult.monitorXpath !== undefined) state.monitorXpath = statusResult.monitorXpath;
+      if (statusResult.monitorTargetFrame !== undefined) state.monitorTargetFrame = statusResult.monitorTargetFrame || 'top';
       if (statusResult.voiceNotifyEnabled !== undefined) state.voiceNotifyEnabled = statusResult.voiceNotifyEnabled;
       if (statusResult.voiceNotifyMessage !== undefined) state.voiceNotifyMessage = statusResult.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
       if (statusResult.popupNotifyEnabled !== undefined) state.popupNotifyEnabled = statusResult.popupNotifyEnabled;
@@ -604,7 +605,10 @@ function bindEvents() {
         tabId: state.tabId,
         monitorEnabled: state.monitorEnabled,
         monitorXpath: state.monitorXpath,
+        monitorTargetFrame: state.monitorTargetFrame,
+        voiceNotifyEnabled: state.voiceNotifyEnabled,
         voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
+        popupNotifyEnabled: state.popupNotifyEnabled,
         monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
       });
       addLog(state.monitorEnabled ? '监控模式已启用' : '监控模式已关闭', 'info');
@@ -986,6 +990,7 @@ async function startRefresh() {
     maxCount: state.maxCount,
     monitorEnabled: state.monitorEnabled,
     monitorXpath: state.monitorXpath,
+    monitorTargetFrame: state.monitorTargetFrame,
     voiceNotifyEnabled: state.voiceNotifyEnabled,
     voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
     popupNotifyEnabled: state.popupNotifyEnabled,
@@ -1164,7 +1169,10 @@ chrome.runtime.onMessage.addListener(async (msg) => {
             tabId: state.tabId,
             monitorEnabled: state.monitorEnabled,
             monitorXpath: state.monitorXpath,
+            monitorTargetFrame: state.monitorTargetFrame,
+            voiceNotifyEnabled: state.voiceNotifyEnabled,
             voiceNotifyMessage: state.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
+            popupNotifyEnabled: state.popupNotifyEnabled,
             monitorNotifyMessage: state.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE,
           });
         }

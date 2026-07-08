@@ -41,6 +41,21 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeMonitorValue(value) {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return normalized || 'xx00';
+}
+
+function hashMonitorValue(value) {
+  const normalized = normalizeMonitorValue(value);
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${hash >>> 0}`;
+}
+
 // ===== Message Handler =====
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tabId = sender.tab?.id;
@@ -83,6 +98,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           waitingForLoad: ts.waitingForLoad,
           monitorEnabled: ts.monitorEnabled,
           monitorXpath: ts.monitorXpath,
+          monitorTargetFrame: ts.monitorTargetFrame,
           voiceNotifyEnabled: ts.voiceNotifyEnabled,
           voiceNotifyMessage: ts.voiceNotifyMessage,
           popupNotifyEnabled: ts.popupNotifyEnabled,
@@ -125,9 +141,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ts = tabStates.get(activeTabId);
         ts.monitorEnabled = msg.monitorEnabled || false;
         ts.monitorXpath = msg.monitorXpath || '';
+        if (msg.monitorTargetFrame !== undefined) ts.monitorTargetFrame = msg.monitorTargetFrame || 'top';
+        if (msg.voiceNotifyEnabled !== undefined) ts.voiceNotifyEnabled = !!msg.voiceNotifyEnabled;
         if (msg.voiceNotifyMessage !== undefined) ts.voiceNotifyMessage = msg.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE;
+        if (msg.popupNotifyEnabled !== undefined) ts.popupNotifyEnabled = !!msg.popupNotifyEnabled;
         if (msg.monitorNotifyMessage !== undefined) {
           ts.monitorNotifyMessage = msg.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE;
+        }
+        if (ts.monitorEnabled && ts.monitorXpath) {
+          ts.monitorLastHash = '';
+          captureMonitorHash(activeTabId, ts, 10000).catch(() => {});
+        } else {
+          ts.monitorLastHash = '';
         }
       }
       sendResponse({ ok: true });
@@ -366,7 +391,8 @@ function startTimer(tabId, config) {
     waitingForLoad: false, // true when waiting for page to finish loading after full refresh
     monitorEnabled: config.monitorEnabled || false,
     monitorXpath: config.monitorXpath || '',
-    monitorLastValue: '',
+    monitorTargetFrame: config.monitorTargetFrame || 'top',
+    monitorLastHash: '',
     voiceNotifyEnabled: config.voiceNotifyEnabled || false,
     voiceNotifyMessage: config.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
     popupNotifyEnabled: config.popupNotifyEnabled || false,
@@ -379,6 +405,10 @@ function startTimer(tabId, config) {
   tabStates.set(tabId, ts);
   scheduleNextTick(tabId);
   startBadgeTimer(tabId);
+
+  if (ts.monitorEnabled && ts.monitorXpath) {
+    captureMonitorHash(tabId, ts, 10000).catch(() => {});
+  }
 
   // Create float window if enabled
   if (ts.floatWindowEnabled) {
@@ -462,6 +492,7 @@ async function startTimerFromStoredConfig(tabId) {
     'monitorEnabled',
     'monitorXpath',
     'monitorXpathCache',
+    'monitorTargetFrame',
     'voiceNotifyEnabled',
     'voiceNotifyMessageCache',
     'popupNotifyEnabled',
@@ -500,6 +531,9 @@ async function startTimerFromStoredConfig(tabId) {
   const monitorXpath = hasOwn(siteSettings, 'monitorXpath')
     ? (siteSettings.monitorXpath || '')
     : (pageKey ? (monitorXpathCache[pageKey] || '') : (storage.monitorXpath || ''));
+  const monitorTargetFrame = hasOwn(siteSettings, 'monitorTargetFrame')
+    ? (siteSettings.monitorTargetFrame || 'top')
+    : (storage.monitorTargetFrame || 'top');
   const monitorNotifyMessage = hasOwn(siteSettings, 'monitorNotifyMessage')
     ? (siteSettings.monitorNotifyMessage || DEFAULT_MONITOR_NOTIFY_MESSAGE)
     : (pageKey ? (monitorNotifyMessageCache[pageKey] || DEFAULT_MONITOR_NOTIFY_MESSAGE) : DEFAULT_MONITOR_NOTIFY_MESSAGE);
@@ -546,6 +580,7 @@ async function startTimerFromStoredConfig(tabId) {
     maxCount,
     monitorEnabled,
     monitorXpath,
+    monitorTargetFrame,
     // alertSettingsEnabled legacy flag removed; rely on individual notify flags
     voiceNotifyEnabled,
     voiceNotifyMessage,
@@ -597,12 +632,25 @@ function startBadgeTimer(tabId) {
   badgeTimers.set(tabId, setInterval(() => updateBadgeForTab(tabId), 1000));
 }
 
-async function getXPathText(tabId, xpath) {
+async function getXPathText(tabId, xpath, fallbackFrame = 'top') {
   const parsed = splitFrameXPath(xpath);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tabId, allFrames: true },
       func: (frameXPath, innerXPath, separator) => {
+        const getMonitorValue = (element) => {
+          const text = (element.textContent || '').trim();
+          const inputValue = 'value' in element ? String(element.value || '') : '';
+          const checkedValue = 'checked' in element ? String(element.checked) : '';
+          const selectedValue = 'selectedIndex' in element ? String(element.selectedIndex) : '';
+          const attrs = ['class', 'style', 'title', 'aria-label', 'aria-pressed', 'aria-selected', 'data-value']
+            .map((name) => element.getAttribute(name) || '')
+            .filter(Boolean)
+            .join('|');
+          const html = (element.innerHTML || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+          return [text, inputValue, checkedValue, selectedValue, attrs, html].filter(Boolean).join('||');
+        };
+
         try {
           if (frameXPath) {
             if (window === window.top) {
@@ -611,51 +659,67 @@ async function getXPathText(tabId, xpath) {
               const index = Array.from(document.querySelectorAll('iframe')).indexOf(iframe);
               return index >= 0 ? `${separator}${index}` : '';
             }
-            return '';
+            return null;
           }
 
           const result = document.evaluate(innerXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
           const element = result.singleNodeValue;
-          return element ? (element.textContent || '').trim() : '';
+          return element ? getMonitorValue(element) : null;
         } catch (e) {
-          return '';
+          return null;
         }
       },
       args: [parsed.frameXPath, parsed.innerXPath, IFRAME_XPATH_SEPARATOR],
     });
     if (parsed.frameXPath) {
       const marker = results.find((r) => typeof r.result === 'string' && r.result.startsWith(IFRAME_XPATH_SEPARATOR))?.result;
-      const targetFrame = marker ? marker.slice(IFRAME_XPATH_SEPARATOR.length) : '';
-      if (!targetFrame) return '';
+      let targetFrame = marker ? marker.slice(IFRAME_XPATH_SEPARATOR.length) : '';
+      if (!targetFrame && fallbackFrame && fallbackFrame !== 'top') {
+        targetFrame = String(fallbackFrame);
+      }
+      if (!targetFrame) return null;
       await syncFrameIndexes(tabId);
       await sleep(60);
 
       const frameResults = await chrome.scripting.executeScript({
         target: { tabId: tabId, allFrames: true },
         func: (innerXPath, frameIndex) => {
+          const getMonitorValue = (element) => {
+            const text = (element.textContent || '').trim();
+            const inputValue = 'value' in element ? String(element.value || '') : '';
+            const checkedValue = 'checked' in element ? String(element.checked) : '';
+            const selectedValue = 'selectedIndex' in element ? String(element.selectedIndex) : '';
+            const attrs = ['class', 'style', 'title', 'aria-label', 'aria-pressed', 'aria-selected', 'data-value']
+              .map((name) => element.getAttribute(name) || '')
+              .filter(Boolean)
+              .join('|');
+            const html = (element.innerHTML || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+            return [text, inputValue, checkedValue, selectedValue, attrs, html].filter(Boolean).join('||');
+          };
+
           try {
-            if (window === window.top) return '';
-            if (String(window.__autoRefreshFrameIndex || '') !== String(frameIndex)) return '';
+            if (window === window.top) return null;
+            if (String(window.__autoRefreshFrameIndex || '') !== String(frameIndex)) return null;
             const result = document.evaluate(innerXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
             const element = result.singleNodeValue;
-            return element ? (element.textContent || '').trim() : '';
+            return element ? getMonitorValue(element) : null;
           } catch (e) {
-            return '';
+            return null;
           }
         },
         args: [parsed.innerXPath, targetFrame],
       });
       for (const r of frameResults) {
-        if (r.result) return r.result;
+        if (r.result !== null && r.result !== undefined) return r.result;
       }
-      return '';
+      return null;
     }
     for (const r of results) {
-      if (r.result) return r.result;
+      if (r.result !== null && r.result !== undefined) return r.result;
     }
-    return '';
+    return null;
   } catch (e) {
-    return '';
+    return null;
   }
 }
 
@@ -703,17 +767,51 @@ async function syncFrameIndexes(tabId) {
   } catch (e) { /* ignore */ }
 }
 
-async function waitForXPathText(tabId, xpath, timeoutMs = 10000) {
+async function waitForXPathText(tabId, xpath, timeoutMs = 10000, fallbackFrame = 'top') {
   const startTime = Date.now();
   const intervalMs = 500;
-  let lastText = '';
+  let lastText = null;
   while (Date.now() - startTime < timeoutMs) {
-    const text = await getXPathText(tabId, xpath);
-    if (text) return text;
+    const text = await getXPathText(tabId, xpath, fallbackFrame);
+    if (text !== null && text !== undefined) return text;
     lastText = text;
     await new Promise(r => setTimeout(r, intervalMs));
   }
   return lastText;
+}
+
+async function captureMonitorHash(tabId, ts, timeoutMs = 10000) {
+  if (!ts.monitorEnabled || !ts.monitorXpath) return false;
+
+  const value = await waitForXPathText(tabId, ts.monitorXpath, timeoutMs, ts.monitorTargetFrame);
+  if (value === null || value === undefined) return false;
+
+  ts.monitorLastHash = hashMonitorValue(value);
+  return true;
+}
+
+async function ensureMonitorBaseline(tabId, ts, timeoutMs = 2000) {
+  if (!ts.monitorLastHash) {
+    await captureMonitorHash(tabId, ts, timeoutMs);
+  }
+}
+
+async function checkMonitorChange(tabId, ts, timeoutMs = 10000) {
+  if (!ts.monitorEnabled || !ts.monitorXpath) return;
+
+  const value = await waitForXPathText(tabId, ts.monitorXpath, timeoutMs, ts.monitorTargetFrame);
+  if (value === null || value === undefined) return;
+
+  const newHash = hashMonitorValue(value);
+  if (!ts.monitorLastHash) {
+    ts.monitorLastHash = newHash;
+    return;
+  }
+
+  if (newHash !== ts.monitorLastHash) {
+    ts.monitorLastHash = newHash;
+    await triggerMonitorNotify(tabId, ts);
+  }
 }
 
 async function triggerMonitorNotify(tabId, ts) {
@@ -725,15 +823,24 @@ async function triggerMonitorNotify(tabId, ts) {
   }
 
   if (ts.voiceNotifyEnabled) {
-    // Voice playback still needs the target page, but popup notification is handled globally above.
     try {
-      const resp = await chrome.tabs.sendMessage(tabId, {
-        type: 'MONITOR_NOTIFY',
-        voice: true,
-        voiceMessage: ts.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE,
-        popup: false,
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: (message) => {
+          try {
+            const utterance = new SpeechSynthesisUtterance(message);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 1.0;
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        },
+        args: [ts.voiceNotifyMessage || DEFAULT_VOICE_NOTIFY_MESSAGE],
       });
-      if (resp && resp.ok) notified = true;
+      if (results?.some((item) => item.result)) notified = true;
     } catch (e) {
       // System popup notification has already been attempted above.
     }
@@ -796,12 +903,8 @@ async function executeTick(tabId) {
 
   try {
     if (ts.mode === 'full') {
-      // Full page refresh
-      // If monitor enabled, save current value before reload
-      if (ts.monitorEnabled && ts.monitorXpath) {
-        ts.monitorLastValue = await getXPathText(tabId, ts.monitorXpath);
-      }
-
+      // Full page refresh. Monitor comparison runs after the reloaded page is ready.
+      await ensureMonitorBaseline(tabId, ts, 2000);
       ts.waitingForLoad = true;
       updateBadgeForTab(tabId);
       await chrome.tabs.reload(tabId);
@@ -817,12 +920,8 @@ async function executeTick(tabId) {
       }).catch(() => {});
 
     } else if (ts.mode === 'xpath') {
-      // If monitor enabled, save current value before click
-      if (ts.monitorEnabled && ts.monitorXpath) {
-        ts.monitorLastValue = await getXPathText(tabId, ts.monitorXpath);
-      }
-
       // XPath click mode - send message to content script in target frame.
+      await ensureMonitorBaseline(tabId, ts, 2000);
       const resolvedTargetFrame = await resolveFrameTarget(tabId, ts.xpath, ts.targetFrame);
       await syncFrameIndexes(tabId);
       await sleep(60);
@@ -856,10 +955,7 @@ async function executeTick(tabId) {
       // For xpath mode, check monitor change after click with retry
       if (ts.monitorEnabled && ts.monitorXpath) {
         setTimeout(async () => {
-          const newValue = await waitForXPathText(tabId, ts.monitorXpath, 10000);
-          if (newValue && newValue !== ts.monitorLastValue) {
-            await triggerMonitorNotify(tabId, ts);
-          }
+          await checkMonitorChange(tabId, ts, 10000);
         }, 500);
       }
 
@@ -900,10 +996,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       // Check monitor change after page loaded with retry (up to 10s)
       if (ts.monitorEnabled && ts.monitorXpath) {
         setTimeout(async () => {
-          const newValue = await waitForXPathText(tabId, ts.monitorXpath, 10000);
-          if (newValue && newValue !== ts.monitorLastValue) {
-            await triggerMonitorNotify(tabId, ts);
-          }
+          await checkMonitorChange(tabId, ts, 10000);
         }, 500);
       }
 
