@@ -16,7 +16,7 @@
 </div>
 
 ---
-## 🌌 **插件界面**
+## 🛸 **插件界面**
 
 <p align="center">
   <img src="hoem.png" alt="Auto Refresh Pro Home" width="50%" style="border-radius: 10px; border: 1px solid #e1e4e8;">
