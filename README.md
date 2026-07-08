@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="https://via.placeholder.com/64/00d4ff/ffffff?text=🔄" width="64" style="vertical-align:middle">
+    <img src="https://github.com/freewindes/Auto-Refresh-Pro/blob/main/icons/icon128.png" width="64" style="vertical-align:middle">
     <strong style="font-size: 3.2em; background: linear-gradient(90deg, #00d4ff, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
       Auto Refresh Pro
     </strong>
