@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="https://github.com/freewindes/Auto-Refresh-Pro/blob/main/icons/icon48.png" width="64" style="vertical-align:middle">
+    <img src="icons/icon48.png" width="64" style="vertical-align:middle">
     <strong style="font-size: 3.2em; background: linear-gradient(90deg, #00d4ff, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
       Auto Refresh Pro
     </strong>
@@ -12,16 +12,15 @@
     <img src="https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome" alt="Chrome">
     <img src="https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge" alt="Manifest V3">
   </p>
-  定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗
+  <p>定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗</p>
 </div>
-
-
 
 ---
 
-<div>
-https://github.com/freewindes/Auto-Refresh-Pro/blob/main/hoem.png?raw=true
-</div>
+<p align="center">
+  <img src="hoem.png" alt="Auto Refresh Pro Home" width="85%" style="border-radius: 10px; border: 1px solid #e1e4e8;">
+</p>
+
 ---
 
 ## 🌌 **功能矩阵**
