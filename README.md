@@ -8,9 +8,13 @@
   
   <p><strong>智能网页自动刷新扩展</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/版本-1.0.11-%2300d4ff?style=for-the-badge" alt="Version">
-    <img src="https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome" alt="Chrome">
+    <img src="https://img.shields.io/badge/版本-1.0.21-%2300d4ff?style=for-the-badge" alt="Version">
     <img src="https://img.shields.io/badge/Manifest-V3-%23FF6B6B?style=for-the-badge" alt="Manifest V3">
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/Chrome-Extension-%234285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Chrome">
+    <img src="https://img.shields.io/badge/Firefox-Addon-%23FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Firefox">
+    <img src="https://img.shields.io/badge/Edge-Extension-%230078D4?style=for-the-badge&logo=microsoftedge&logoColor=white" alt="Edge">
   </p>
   <p>定时刷新 · XPath 智能点击 · 实时内容监控 · 悬浮控制窗</p>
 </div>
