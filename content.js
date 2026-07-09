@@ -154,23 +154,10 @@ function generateXPath(element) {
     return `//*[@id="${element.id}"]`;
   }
 
-  // Try to use class names for a more readable xpath
   const tag = element.tagName.toLowerCase();
 
-  // Check if element has a unique class combination
-  if (element.classList.length > 0) {
-    const classSelector = Array.from(element.classList)
-      .map(c => `contains(@class,'${c}')`)
-      .join(' and ');
-    const xpath = `//${tag}[${classSelector}]`;
-    // Verify uniqueness
-    const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    if (result.snapshotLength === 1) {
-      return xpath;
-    }
-  }
-
-  // Fall back to positional xpath
+  // Prefer stable positional paths over class-based paths. Many sites add
+  // transient hover/active classes during picking, which breaks later lookup.
   const parent = element.parentNode;
   if (!parent) return tag;
 
@@ -857,7 +844,7 @@ function createFloatWindow() {
   // Build structured floatWindow with status light, countdown and icon buttons
   floatWindow = document.createElement('div');
   floatWindow.id = '__auto_refresh_float_window__';
-  floatWindow.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;width:200px;padding:8px;background:rgba(255,255,255,0.96);border:1px solid rgba(15,23,42,0.08);border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.12);backdrop-filter:blur(6px);cursor:move;user-select:none;font-family:"Segoe UI","Noto Sans SC",sans-serif;font-size:11px;color:#0f172a;display:flex;align-items:center;gap:8px;';
+  floatWindow.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;width:150px;padding:8px;background:rgba(255, 255, 255, 0.15);border:1px solid rgba(15,23,42,0.08);border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.12);backdrop-filter:blur(6px);cursor:move;user-select:none;font-family:"Segoe UI","Noto Sans SC",sans-serif;font-size:11px;color:#0f172a;display:flex;align-items:center;gap:8px;';
 
   // Status indicator
   const statusIndicator = document.createElement('div');

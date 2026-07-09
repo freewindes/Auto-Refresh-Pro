@@ -7,6 +7,7 @@
 const tabStates = new Map();
 const floatWindowPrefs = new Map();
 const badgeTimers = new Map();
+const monitorNotificationTargets = new Map();
 const IFRAME_XPATH_SEPARATOR = ' >> ';
 const DEFAULT_VOICE_NOTIFY_MESSAGE = '监控区域内容已发生变化';
 const DEFAULT_MONITOR_NOTIFY_MESSAGE = '监控区域发生变化，请及时查看。';
@@ -864,6 +865,7 @@ async function createMonitorSystemNotification(tabId, ts) {
     } catch (e) { /* ignore */ }
 
     const notificationId = `monitor-${tabId}-${Date.now()}`;
+    monitorNotificationTargets.set(notificationId, tabId);
     await chrome.notifications.create(notificationId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
@@ -872,6 +874,7 @@ async function createMonitorSystemNotification(tabId, ts) {
       priority: 2,
     });
     setTimeout(() => {
+      monitorNotificationTargets.delete(notificationId);
       chrome.notifications.clear(notificationId).catch(() => {});
     }, 5000);
     return true;
@@ -879,6 +882,25 @@ async function createMonitorSystemNotification(tabId, ts) {
     return false;
   }
 }
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  const tabId = monitorNotificationTargets.get(notificationId);
+  if (!tabId) return;
+
+  monitorNotificationTargets.delete(notificationId);
+  chrome.notifications.clear(notificationId).catch(() => {});
+  chrome.tabs.get(tabId).then((tab) => {
+    if (!tab?.id) return;
+    if (tab.windowId !== undefined) {
+      chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+  }).catch(() => {});
+});
+
+chrome.notifications.onClosed.addListener((notificationId) => {
+  monitorNotificationTargets.delete(notificationId);
+});
 
 async function executeTick(tabId) {
   const ts = tabStates.get(tabId);
